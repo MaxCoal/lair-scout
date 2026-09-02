@@ -7,6 +7,9 @@ export type Win32Opts = {
   title?: string
   hwnd?: number
   pid?: number
+  owner?: number
+  topmost?: boolean
+  taskbar?: boolean
   x?: number
   y?: number
   width?: number
@@ -41,6 +44,9 @@ class Win32Host {
           action: opts.action,
           handle: opts.hwnd ?? 0,
           pid: opts.pid ?? 0,
+          owner: opts.owner ?? 0,
+          topmost: Boolean(opts.topmost),
+          taskbar: Boolean(opts.taskbar),
           title: opts.title ?? '',
           x: Math.round(opts.x ?? 0),
           y: Math.round(opts.y ?? 0),
@@ -109,8 +115,10 @@ export async function controlWindow(opts: Win32Opts): Promise<number> {
   }
 }
 
-export async function hideFoxWindow(opts: { pid?: number; hwnd?: number; title?: string }): Promise<number> {
-  return controlWindow({ action: 'hide', ...opts })
+export async function hideFoxWindow(
+  opts: { pid?: number; hwnd?: number; title?: string; owner?: number }
+): Promise<number> {
+  return controlWindow({ action: 'hide', taskbar: false, topmost: false, ...opts })
 }
 
 export async function findFoxWindow(opts: { pid?: number; hwnd?: number; title?: string }): Promise<number> {
@@ -118,14 +126,14 @@ export async function findFoxWindow(opts: { pid?: number; hwnd?: number; title?:
 }
 
 export async function showWindow(hwnd: number): Promise<number> {
-  return controlWindow({ action: 'show', hwnd })
+  return controlWindow({ action: 'show', hwnd, taskbar: true, topmost: false, owner: 0 })
 }
 
 export async function placeFoxWindow(
-  opts: { pid?: number; hwnd?: number; title?: string },
+  opts: { pid?: number; hwnd?: number; title?: string; owner?: number },
   rect: { x: number; y: number; width: number; height: number }
 ): Promise<number> {
-  return controlWindow({ action: 'place', ...opts, ...rect })
+  return controlWindow({ action: 'place', taskbar: false, topmost: true, ...opts, ...rect })
 }
 
 export function stopWin32Host(): void {

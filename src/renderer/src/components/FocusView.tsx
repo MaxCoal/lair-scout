@@ -115,7 +115,7 @@ export default function FocusView({ fox, driveAll, fleetCount, live, onBack }: P
         onContextMenu={(event) => event.preventDefault()}
       >
         {live ? (
-          <div className="placeholder">Live Firefox sits in this panel — click it directly.</div>
+          <div className="placeholder">Live Chromium sits in this panel — click it directly.</div>
         ) : fox.screenshot ? (
           <img
             src={fox.screenshot}

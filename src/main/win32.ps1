@@ -69,7 +69,7 @@ public static class FoxBoxNative {
 function Get-ProfilePids([string]$ProfileDir) {
   $norm = $ProfileDir.Replace('/', '\').TrimEnd('\')
   $pids = New-Object System.Collections.Generic.List[uint]
-  Get-CimInstance Win32_Process -Filter "Name = 'firefox.exe'" | ForEach-Object {
+  Get-CimInstance Win32_Process | Where-Object { $_.Name -match '^(chrome|chromium|firefox)\.exe$' } | ForEach-Object {
     $cmd = $_.CommandLine
     if (-not $cmd) { return }
     $idx = $cmd.IndexOf($norm, [System.StringComparison]::OrdinalIgnoreCase)

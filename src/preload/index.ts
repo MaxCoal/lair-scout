@@ -30,6 +30,8 @@ const api: FoxboxAPI = {
   dock: (id) => ipcRenderer.invoke('instances:dock', id),
   interact: (id, rect) => ipcRenderer.invoke('instances:interact', id, rect),
   stopInteract: (id) => ipcRenderer.invoke('instances:stopInteract', id),
+  openDriveWindow: () => ipcRenderer.invoke('drive:open'),
+  closeDriveWindow: () => ipcRenderer.invoke('drive:close'),
   setMuted: (muted) => ipcRenderer.invoke('alerts:setMuted', muted),
   setFocused: (id) => ipcRenderer.invoke('instances:setFocused', id),
   onUpdate: (cb) => {
@@ -44,6 +46,13 @@ const api: FoxboxAPI = {
     ipcRenderer.on('instances:admitted', listener)
     return () => {
       ipcRenderer.removeListener('instances:admitted', listener)
+    }
+  },
+  onQueuePopped: (cb) => {
+    const listener = (_event: unknown, id: string): void => cb(id)
+    ipcRenderer.on('instances:queuePopped', listener)
+    return () => {
+      ipcRenderer.removeListener('instances:queuePopped', listener)
     }
   }
 }

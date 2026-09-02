@@ -4,9 +4,30 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { firefoxManager } from './firefoxManager'
 
 let quitting = false
+let mainWindow: BrowserWindow | null = null
+let driveWindow: BrowserWindow | null = null
+
+function rendererPrefs() {
+  return {
+    preload: join(__dirname, '../preload/index.js'),
+    sandbox: false,
+    contextIsolation: true,
+    nodeIntegration: false
+  }
+}
+
+function loadRenderer(window: BrowserWindow, hash = ''): void {
+  if (is.dev && process.env.ELECTRON_RENDERER_URL) {
+    void window.loadURL(`${process.env.ELECTRON_RENDERER_URL}${hash}`)
+  } else if (hash) {
+    void window.loadFile(join(__dirname, '../renderer/index.html'), { hash: hash.replace(/^#/, '') })
+  } else {
+    void window.loadFile(join(__dirname, '../renderer/index.html'))
+  }
+}
 
 function createWindow(): BrowserWindow {
-  const mainWindow = new BrowserWindow({
+  const window = new BrowserWindow({
     width: 1440,
     height: 920,
     minWidth: 1024,
@@ -15,30 +36,52 @@ function createWindow(): BrowserWindow {
     backgroundColor: '#0c0d10',
     title: 'FoxBox',
     autoHideMenuBar: true,
-    webPreferences: {
-      preload: join(__dirname, '../preload/index.js'),
-      sandbox: false,
-      contextIsolation: true,
-      nodeIntegration: false
-    }
+    webPreferences: rendererPrefs()
   })
 
-  mainWindow.on('ready-to-show', () => {
-    mainWindow.show()
+  window.on('ready-to-show', () => {
+    window.show()
   })
 
-  mainWindow.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url)
+  window.webContents.setWindowOpenHandler((details) => {
+    void shell.openExternal(details.url)
     return { action: 'deny' }
   })
 
-  if (is.dev && process.env.ELECTRON_RENDERER_URL) {
-    mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
-  } else {
-    mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
-  }
+  window.on('closed', () => {
+    mainWindow = null
+    driveWindow?.close()
+  })
 
-  return mainWindow
+  loadRenderer(window)
+  return window
+}
+
+function createDriveWindow(): void {
+  if (driveWindow && !driveWindow.isDestroyed()) {
+    driveWindow.show()
+    driveWindow.focus()
+    return
+  }
+  driveWindow = new BrowserWindow({
+    width: 1100,
+    height: 740,
+    minWidth: 640,
+    minHeight: 420,
+    backgroundColor: '#0c0d10',
+    title: 'FoxBox Drive',
+    autoHideMenuBar: true,
+    webPreferences: rendererPrefs()
+  })
+  loadRenderer(driveWindow, '#drive')
+  driveWindow.on('closed', () => {
+    driveWindow = null
+  })
+}
+
+function closeDriveWindow(): void {
+  if (driveWindow && !driveWindow.isDestroyed()) driveWindow.close()
+  driveWindow = null
 }
 
 function registerIpc(): void {
@@ -71,6 +114,12 @@ function registerIpc(): void {
       firefoxManager.interact(id, rect)
   )
   ipcMain.handle('instances:stopInteract', (_event, id: string) => firefoxManager.stopInteract(id))
+  ipcMain.handle('drive:open', () => {
+    createDriveWindow()
+  })
+  ipcMain.handle('drive:close', () => {
+    closeDriveWindow()
+  })
   ipcMain.handle('alerts:setMuted', (_event, muted: boolean) => firefoxManager.setMuted(muted))
   ipcMain.handle('instances:setFocused', (_event, id: string | null) => firefoxManager.setFocused(id))
 }
@@ -83,8 +132,8 @@ app.whenReady().then(async () => {
   })
 
   registerIpc()
-  const window = createWindow()
-  firefoxManager.attach(window)
+  mainWindow = createWindow()
+  firefoxManager.attach(mainWindow)
 
   try {
     await firefoxManager.startDefaultFleet()
@@ -93,7 +142,10 @@ app.whenReady().then(async () => {
   }
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (BrowserWindow.getAllWindows().length === 0) {
+      mainWindow = createWindow()
+      firefoxManager.attach(mainWindow)
+    }
   })
 })
 

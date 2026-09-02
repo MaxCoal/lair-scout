@@ -4,20 +4,22 @@ import FleetBar from './components/FleetBar'
 import Sidebar from './components/Sidebar'
 import InstanceGrid from './components/InstanceGrid'
 import FocusView from './components/FocusView'
+import DrivePad from './components/DrivePad'
 
 const DEFAULT_URL = 'https://secretlair.wizards.com/us'
+const IS_DRIVE_PAD = window.location.hash === '#drive'
 
-function playAdmitTone(): void {
+function playTone(startHz: number, endHz: number): void {
   const ctx = new AudioContext()
   const osc = ctx.createOscillator()
   const gain = ctx.createGain()
   osc.type = 'triangle'
-  osc.frequency.value = 784
+  osc.frequency.value = startHz
   gain.gain.value = 0.05
   osc.connect(gain)
   gain.connect(ctx.destination)
   osc.start()
-  osc.frequency.exponentialRampToValueAtTime(1175, ctx.currentTime + 0.18)
+  osc.frequency.exponentialRampToValueAtTime(endHz, ctx.currentTime + 0.18)
   gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.4)
   osc.stop(ctx.currentTime + 0.42)
 }
@@ -36,7 +38,13 @@ export default function App() {
 
   useEffect(() => {
     return window.foxbox.onAdmitted(() => {
-      if (!muted) playAdmitTone()
+      if (!muted) playTone(784, 1175)
+    })
+  }, [muted])
+
+  useEffect(() => {
+    return window.foxbox.onQueuePopped(() => {
+      if (!muted) playTone(392, 784)
     })
   }, [muted])
 
@@ -55,7 +63,7 @@ export default function App() {
       }
       if (event.type === 'keydown' && event.repeat) return
       event.preventDefault()
-      void window.foxbox.key({
+      window.foxbox.key({
         id: '*',
         key: event.key,
         type: event.type === 'keyup' ? 'up' : 'down'
@@ -70,13 +78,30 @@ export default function App() {
   }, [driveAll, focusedId, liveId])
 
   const focused = useMemo(
-    () => instances.find((fox) => fox.id === focusedId) ?? null,
+    () =>
+      instances.find((fox) => fox.id === focusedId) ??
+      instances.find((fox) => fox.focused) ??
+      instances[0] ??
+      null,
     [instances, focusedId]
   )
 
   const sendAll = (event: FormEvent): void => {
     event.preventDefault()
     void window.foxbox.gotoAll(url)
+  }
+
+  const selectFox = (id: string, live: boolean): void => {
+    setFocusedId(id)
+    setLiveId(live ? id : null)
+  }
+
+  if (IS_DRIVE_PAD) {
+    return (
+      <div className="shell drive-shell">
+        <DrivePad fox={focused} fleetCount={instances.length} standalone />
+      </div>
+    )
   }
 
   return (
@@ -98,16 +123,22 @@ export default function App() {
           setMuted(next)
           void window.foxbox.setMuted(next)
         }}
-        onToggleDriveAll={() => setDriveAll((value) => !value)}
+        onToggleDriveAll={() => {
+          setDriveAll((value) => {
+            const next = !value
+            setLiveId(null)
+            if (next) void window.foxbox.openDriveWindow()
+            else void window.foxbox.closeDriveWindow()
+            return next
+          })
+        }}
+        onOpenDriveWindow={() => window.foxbox.openDriveWindow()}
       />
       <div className="workspace">
         <Sidebar
           instances={instances}
           focusedId={focusedId}
-          onFocus={(id) => {
-            setFocusedId(id)
-            setLiveId(id)
-          }}
+          onFocus={(id) => selectFox(id, !driveAll)}
           onKill={(id) => {
             if (focusedId === id) setFocusedId(null)
             if (liveId === id) setLiveId(null)
@@ -116,17 +147,30 @@ export default function App() {
         />
         <main className="main">
           {instances.length >= 6 ? (
-            <p className="warn">Each Firefox uses a lot of RAM. Scale down if the machine starts swapping.</p>
+            <p className="warn">Each Chromium uses a lot of RAM. Scale down if the machine starts swapping.</p>
           ) : null}
-          {driveAll && !focused ? (
-            <p className="hint">Drive all is on. Click, scroll, or type on any preview to control every fox.</p>
-          ) : null}
-          {focused ? (
+          {driveAll ? (
+            <div className="drive-layout">
+              <p className="hint">
+                Drive all is on. Use the zoomed view or the extra window on another monitor. Click a tile to choose which
+                fox you watch.
+              </p>
+              <DrivePad fox={focused} fleetCount={instances.length} />
+              <div className="drive-thumbs">
+                <InstanceGrid
+                  instances={instances}
+                  driveAll={driveAll}
+                  onFocus={(id) => selectFox(id, false)}
+                  onGotoOne={(id) => window.foxbox.gotoOne(id, url)}
+                />
+              </div>
+            </div>
+          ) : focused && liveId === focused.id ? (
             <FocusView
               fox={focused}
-              driveAll={driveAll}
+              driveAll={false}
               fleetCount={instances.length}
-              live={liveId === focused.id}
+              live
               onBack={() => {
                 setLiveId(null)
                 setFocusedId(null)
@@ -135,11 +179,8 @@ export default function App() {
           ) : (
             <InstanceGrid
               instances={instances}
-              driveAll={driveAll}
-              onFocus={(id) => {
-                setFocusedId(id)
-                setLiveId(id)
-              }}
+              driveAll={false}
+              onFocus={(id) => selectFox(id, true)}
               onGotoOne={(id) => window.foxbox.gotoOne(id, url)}
             />
           )}

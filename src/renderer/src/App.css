@@ -339,6 +339,12 @@ input {
 .chip.loading {
   color: var(--loading);
 }
+.chip.not_in_queue {
+  color: #d1d5db;
+}
+.chip.waiting_for_queue {
+  color: #c4b5fd;
+}
 .chip.in_queue {
   color: var(--queue);
 }
@@ -381,6 +387,44 @@ input {
 .focus-stage.live {
   min-height: 420px;
   background: #07080a;
+}
+
+.drive-shell {
+  grid-template-rows: 1fr;
+}
+
+.drive-layout {
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto minmax(260px, 1fr) auto;
+  gap: 12px;
+  min-height: 0;
+}
+
+.drive-pad {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 10px;
+}
+
+.drive-pad.standalone {
+  padding: 12px;
+  height: 100%;
+}
+
+.drive-thumbs {
+  min-height: 0;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.drive-thumbs .grid {
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+}
+
+.drive-thumbs .tile {
+  min-height: 0;
 }
 
 @keyframes pulse {

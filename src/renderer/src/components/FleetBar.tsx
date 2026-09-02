@@ -11,6 +11,7 @@ type Props = {
   onKillLast: () => void
   onToggleMute: () => void
   onToggleDriveAll: () => void
+  onOpenDriveWindow: () => void
 }
 
 export default function FleetBar({
@@ -23,7 +24,8 @@ export default function FleetBar({
   onSpawn,
   onKillLast,
   onToggleMute,
-  onToggleDriveAll
+  onToggleDriveAll,
+  onOpenDriveWindow
 }: Props) {
   return (
     <header className="topbar">
@@ -61,6 +63,11 @@ export default function FleetBar({
         <button className={`btn ghost ${driveAll ? 'active' : ''}`} type="button" onClick={onToggleDriveAll}>
           Drive all
         </button>
+        {driveAll ? (
+          <button className="btn" type="button" onClick={onOpenDriveWindow}>
+            Drive window
+          </button>
+        ) : null}
         <button className={`btn ghost ${muted ? 'active' : ''}`} type="button" onClick={onToggleMute}>
           {muted ? 'Alerts off' : 'Alerts on'}
         </button>

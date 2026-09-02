@@ -29,6 +29,7 @@ export class FirefoxManager {
   private muted = false
   private shuttingDown = false
   private dockTimer: NodeJS.Timeout | null = null
+  private interactTimer: NodeJS.Timeout | null = null
   private stageRect: StageRect | null = null
   private ready: Promise<void>
   private markReady: () => void = () => undefined
@@ -43,6 +44,7 @@ export class FirefoxManager {
     this.window = window
     this.ensureWorker()
     this.armDockTimer()
+    this.armInteractTimer()
     window.on('move', () => {
       void this.relayoutInteract()
     })
@@ -67,7 +69,7 @@ export class FirefoxManager {
     await Promise.race([
       this.ready,
       sleep(20000).then(() => {
-        throw new Error('Firefox worker did not start. Is Node.js on PATH?')
+        throw new Error('Chromium worker did not start. Is Node.js on PATH?')
       })
     ])
     for (let i = 0; i < DEFAULT_COUNT; i += 1) {
@@ -87,7 +89,8 @@ export class FirefoxManager {
       state.hwnd = await hideFoxWindow({
         pid: state.pid,
         hwnd: state.hwnd,
-        title: `FoxBox-${id}`
+        title: `FoxBox-${id}`,
+        owner: this.ownerHwnd()
       })
     }
     this.broadcast()
@@ -136,10 +139,16 @@ export class FirefoxManager {
 
   async interact(id: string, rect: StageRect): Promise<void> {
     this.stageRect = rect
+    this.fire('setPaused', { foxId: id, paused: true })
     for (const [otherId, other] of this.windows) {
       if (otherId !== id && other.interacting) {
         other.interacting = false
-        await hideFoxWindow({ pid: other.pid, hwnd: other.hwnd, title: `FoxBox-${otherId}` })
+        await hideFoxWindow({
+          pid: other.pid,
+          hwnd: other.hwnd,
+          title: `FoxBox-${otherId}`,
+          owner: this.ownerHwnd()
+        })
       }
     }
     const state = this.windows.get(id)
@@ -155,7 +164,13 @@ export class FirefoxManager {
     const state = this.windows.get(id)
     if (!state) return
     state.interacting = false
-    state.hwnd = await hideFoxWindow({ pid: state.pid, hwnd: state.hwnd, title: `FoxBox-${id}` })
+    state.hwnd = await hideFoxWindow({
+      pid: state.pid,
+      hwnd: state.hwnd,
+      title: `FoxBox-${id}`,
+      owner: this.ownerHwnd()
+    })
+    this.fire('setPaused', { foxId: id, paused: false })
     this.broadcast()
   }
 
@@ -167,6 +182,7 @@ export class FirefoxManager {
     if (hwnd) state.hwnd = hwnd
     if (state.hwnd) await showWindow(state.hwnd)
     state.poppedOut = true
+    this.fire('setPaused', { foxId: id, paused: true })
     this.broadcast()
   }
 
@@ -175,13 +191,20 @@ export class FirefoxManager {
     if (!state) return
     state.interacting = false
     state.poppedOut = false
-    state.hwnd = await hideFoxWindow({ pid: state.pid, hwnd: state.hwnd, title: `FoxBox-${id}` })
+    state.hwnd = await hideFoxWindow({
+      pid: state.pid,
+      hwnd: state.hwnd,
+      title: `FoxBox-${id}`,
+      owner: this.ownerHwnd()
+    })
+    this.fire('setPaused', { foxId: id, paused: false })
     this.broadcast()
   }
 
   async shutdown(): Promise<void> {
     this.shuttingDown = true
     if (this.dockTimer) clearInterval(this.dockTimer)
+    if (this.interactTimer) clearInterval(this.interactTimer)
     try {
       await this.call('shutdown', {})
     } catch {
@@ -202,7 +225,16 @@ export class FirefoxManager {
       height: Math.max(80, rect.height)
     }
     const phys = screen.dipToScreenRect(this.window, dip)
-    return placeFoxWindow({ pid: state.pid, hwnd: state.hwnd, title: `FoxBox-${id}` }, phys)
+    return placeFoxWindow(
+      { pid: state.pid, hwnd: state.hwnd, title: `FoxBox-${id}`, owner: this.ownerHwnd() },
+      phys
+    )
+  }
+
+  private ownerHwnd(): number {
+    if (!this.window || this.window.isDestroyed()) return 0
+    const buf = this.window.getNativeWindowHandle()
+    return buf.length >= 8 ? Number(buf.readBigUInt64LE(0)) : buf.readUInt32LE(0)
   }
 
   private async relayoutInteract(): Promise<void> {
@@ -214,6 +246,14 @@ export class FirefoxManager {
     }
   }
 
+  private armInteractTimer(): void {
+    if (this.interactTimer) return
+    this.interactTimer = setInterval(() => {
+      if (this.shuttingDown) return
+      void this.relayoutInteract()
+    }, 250)
+  }
+
   private armDockTimer(): void {
     if (this.dockTimer) return
     this.dockTimer = setInterval(() => {
@@ -223,7 +263,8 @@ export class FirefoxManager {
         void hideFoxWindow({
           pid: state.pid,
           hwnd: state.hwnd,
-          title: `FoxBox-${id}`
+          title: `FoxBox-${id}`,
+          owner: this.ownerHwnd()
         }).then((hwnd) => {
           if (hwnd) state.hwnd = hwnd
         })
@@ -253,11 +294,11 @@ export class FirefoxManager {
     rl.on('line', (line) => this.onLine(line))
     child.on('exit', (code) => {
       for (const [id, pending] of this.pending) {
-        pending.reject(new Error(`Firefox worker exited (${code ?? 'unknown'})`))
+        pending.reject(new Error(`Chromium worker exited (${code ?? 'unknown'})`))
         this.pending.delete(id)
       }
       if (!this.shuttingDown) {
-        console.error('Firefox worker exited unexpectedly', code)
+        console.error('Chromium worker exited unexpectedly', code)
       }
     })
   }
@@ -297,7 +338,8 @@ export class FirefoxManager {
         void hideFoxWindow({
           pid: state.pid,
           hwnd: state.hwnd,
-          title: `FoxBox-${payload.foxId}`
+          title: `FoxBox-${payload.foxId}`,
+          owner: this.ownerHwnd()
         }).then((hwnd) => {
           if (hwnd) state.hwnd = hwnd
         })
@@ -316,6 +358,7 @@ export class FirefoxManager {
         const win = this.windows.get(fox.id)
         return {
           ...fox,
+          statusLabel: fox.statusLabel || '',
           poppedOut: win?.poppedOut ?? false,
           interacting: win?.interacting ?? false
         }
@@ -326,13 +369,23 @@ export class FirefoxManager {
 
     if (message.type === 'event' && message.event === 'admitted') {
       const id = String(message.payload)
-      this.window?.webContents.send('instances:admitted', id)
-      if (!this.muted && Notification.isSupported()) {
-        new Notification({
-          title: 'FoxBox',
-          body: `Fox ${id} is through the queue`
-        }).show()
-      }
+      this.emitAlert('instances:admitted', id, `Fox ${id} is through the queue`)
+      return
+    }
+
+    if (message.type === 'event' && message.event === 'queuePopped') {
+      const id = String(message.payload)
+      this.emitAlert('instances:queuePopped', id, `Fox ${id}: queue started`)
+      return
+    }
+  }
+
+  private emitAlert(channel: string, id: string, body: string): void {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send(channel, id)
+    }
+    if (!this.muted && Notification.isSupported()) {
+      new Notification({ title: 'FoxBox', body }).show()
     }
   }
 
@@ -357,8 +410,10 @@ export class FirefoxManager {
   }
 
   private broadcast(): void {
-    if (!this.window || this.window.isDestroyed()) return
-    this.window.webContents.send('instances:update', this.list())
+    const list = this.list()
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send('instances:update', list)
+    }
   }
 }
 

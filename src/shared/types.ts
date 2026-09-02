@@ -1,4 +1,11 @@
-export type SessionStatus = 'idle' | 'loading' | 'in_queue' | 'admitted' | 'error'
+export type SessionStatus =
+  | 'idle'
+  | 'loading'
+  | 'not_in_queue'
+  | 'waiting_for_queue'
+  | 'in_queue'
+  | 'admitted'
+  | 'error'
 
 export type InstanceSnapshot = {
   id: string
@@ -6,11 +13,13 @@ export type InstanceSnapshot = {
   host: string
   title: string
   status: SessionStatus
+  statusLabel: string
   waitTime?: string
   queueNumber?: string
-  screenshot?: string
-  interacting: boolean
-  poppedOut: boolean
+    screenshot?: string
+    interacting: boolean
+    poppedOut: boolean
+    focused?: boolean
   error?: string
   admittedFlash: boolean
 }
@@ -55,8 +64,11 @@ export type FoxboxAPI = {
   dock: (id: string) => Promise<void>
   interact: (id: string, rect: { x: number; y: number; width: number; height: number }) => Promise<void>
   stopInteract: (id: string) => Promise<void>
+  openDriveWindow: () => Promise<void>
+  closeDriveWindow: () => Promise<void>
   setMuted: (muted: boolean) => Promise<void>
   setFocused: (id: string | null) => Promise<void>
   onUpdate: (cb: (instances: InstanceSnapshot[]) => void) => () => void
   onAdmitted: (cb: (id: string) => void) => () => void
+  onQueuePopped: (cb: (id: string) => void) => () => void
 }

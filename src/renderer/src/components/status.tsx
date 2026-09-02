@@ -3,7 +3,9 @@ import type { InstanceSnapshot, SessionStatus } from '@shared/types'
 const LABELS: Record<SessionStatus, string> = {
   idle: 'Idle',
   loading: 'Loading',
-  in_queue: 'In queue',
+  not_in_queue: 'Not In Queue',
+  waiting_for_queue: 'Waiting for Queue',
+  in_queue: 'In Queue',
   admitted: 'Admitted',
   error: 'Error'
 }
@@ -14,8 +16,6 @@ export function StatusChip({ status }: { status: SessionStatus }) {
 
 export function statusLine(fox: InstanceSnapshot): string {
   if (fox.error) return fox.error
-  if (fox.queueNumber) return `Queue ${fox.queueNumber}`
-  if (fox.waitTime) return fox.waitTime
-  if (fox.host) return fox.host
-  return 'Waiting'
+  if (fox.statusLabel) return fox.statusLabel
+  return LABELS[fox.status] || 'Waiting'
 }

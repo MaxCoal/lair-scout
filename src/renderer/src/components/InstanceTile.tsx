@@ -56,7 +56,7 @@ export default function InstanceTile({ fox, driveAll, onFocus, onGotoOne }: Prop
         />
       ) : (
         <div className="placeholder" onClick={() => onFocus(fox.id)}>
-          Starting Firefox…
+          Starting Chromium…
         </div>
       )}
       <div className="tile-overlay">

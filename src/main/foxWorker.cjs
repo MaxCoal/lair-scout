@@ -3,22 +3,25 @@
 delete process.env.PLAYWRIGHT_BROWSERS_PATH
 delete process.env.ELECTRON_RUN_AS_NODE
 
-const { firefox } = require('playwright')
-const { mkdir, rm, writeFile } = require('node:fs/promises')
-const { join } = require('node:path')
+const { chromium } = require('playwright')
+const { mkdir, rm } = require('node:fs/promises')
 const { execFileSync } = require('node:child_process')
 const readline = require('node:readline')
 
 const VIEWPORT = { width: 1280, height: 720 }
 const TICK_MS = 1000
 const FOCUS_TICK_MS = 280
-const QUEUE_HOST = /queue-it\.net|queueit\.com/i
-const WAIT_COPY =
-  /waiting room|you are in line|you're in line|you are now in line|estimated wait|pre-queue|secret lair lounge|please wait|people ahead of you|your place in line/i
-const YOUR_TURN = /it['’]?s your turn|you can now enter|you(?:'| a)?re next|the waiting room has ended/i
+const QUEUE_HOST = /queue-it\.net|queueit\.com|storequeue\.wizards\.com/i
+const PREQUEUE_COPY =
+  /secret lair lounge|waiting room|the (sale|event|drop) has not (yet )?started|has not opened yet|please wait.*begin|we're getting ready|we are getting ready|pre-?queue|before the queue|queue has not started|not started yet|will begin shortly|doors (have not|haven'?t) opened/i
+const IN_QUEUE_COPY =
+  /you are (now )?in line|you're in line|you are in the queue|people ahead of you|visitors ahead of you|your estimated wait|estimated wait time|place in line|queue number/i
+const YOUR_TURN = /it['’]?s your turn|you can now enter|you(?:'| a)?re next|the waiting room has ended|you have been redirected/i
+const LONG_WAIT = /more than an hour|over an hour|over 1 hour|>\s*an hour|greater than (an|1) hour/i
 
 /** @type {Map<string, any>} */
 const instances = new Map()
+const pausedIds = new Set()
 let focusedId = null
 let shuttingDown = false
 let ticking = false
@@ -47,8 +50,116 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value))
 }
 
+function isQueuePopEdge(previous, next) {
+  return next === 'in_queue' && previous !== 'in_queue' && previous !== 'loading' && previous !== 'idle'
+}
+
 function isAdmissionEdge(previous, next) {
-  return previous === 'in_queue' && next === 'admitted'
+  return next === 'admitted' && previous !== 'admitted' && (previous === 'in_queue' || previous === 'waiting_for_queue')
+}
+
+function formatWait(raw) {
+  const text = String(raw || '').replace(/\s+/g, ' ').trim()
+  if (!text) return ''
+  const lower = text.toLowerCase()
+  if (LONG_WAIT.test(lower)) return 'more than an hour'
+  const hours = lower.match(/(\d+)\s*hours?/)
+  if (hours) return `${hours[1]} hour${hours[1] === '1' ? '' : 's'}`
+  const mins = lower.match(/(\d+)\s*(min|mins|minute|minutes)\b/)
+  if (mins) return `${mins[1]} mins`
+  if (/less than a minute|under a minute|<\s*1\s*min/.test(lower)) return '<1 min'
+  if (/a minute|1 minute/.test(lower)) return '1 min'
+  return text
+}
+
+function statusLabel(status, waitTime) {
+  if (status === 'not_in_queue') return 'Not In Queue'
+  if (status === 'waiting_for_queue') return 'Admitted, waiting for Queue'
+  if (status === 'in_queue') {
+    if (!waitTime) return 'In Queue'
+    if (LONG_WAIT.test(waitTime) || waitTime === 'more than an hour') return 'In Queue, more than an hour'
+    return `In Queue, ${waitTime}`
+  }
+  if (status === 'admitted') return 'Admitted'
+  if (status === 'loading') return 'Loading'
+  if (status === 'error') return 'Error'
+  return 'Idle'
+}
+
+function mergeExtract(parts) {
+  const merged = {
+    queueNumber: '',
+    waitTime: '',
+    hasQueueUi: false,
+    inner: '',
+    pageId: '',
+    bodyClass: '',
+    isBeforeOrIdle: null,
+    queueState: null
+  }
+  for (const part of parts) {
+    if (!part) continue
+    if (!merged.queueNumber && part.queueNumber) merged.queueNumber = part.queueNumber
+    if (!merged.waitTime && part.waitTime) merged.waitTime = part.waitTime
+    merged.hasQueueUi = merged.hasQueueUi || part.hasQueueUi
+    if (part.inner) merged.inner += `\n${part.inner}`
+    if (!merged.pageId && part.pageId) merged.pageId = part.pageId
+    if (!merged.bodyClass && part.bodyClass) merged.bodyClass = part.bodyClass
+    if (merged.isBeforeOrIdle == null && part.isBeforeOrIdle != null) merged.isBeforeOrIdle = part.isBeforeOrIdle
+    if (merged.queueState == null && part.queueState != null) merged.queueState = part.queueState
+  }
+  return merged
+}
+
+async function extractFrame(frame) {
+  return frame.evaluate(() => {
+    const unwrap = (value) => {
+      if (value == null) return value
+      if (typeof value === 'function') {
+        try {
+          return value()
+        } catch {
+          return undefined
+        }
+      }
+      return value
+    }
+    const pick = (selectors) => {
+      for (const sel of selectors) {
+        const el = document.querySelector(sel)
+        if (!el) continue
+        const text = el.innerText?.trim() || el.getAttribute('content') || ''
+        if (text) return text
+      }
+      return ''
+    }
+    const vm = window.queueViewModel
+    const ticket = vm ? unwrap(vm.ticket) || vm.ticket : null
+    const fromVm = {
+      pageId: unwrap(vm?.pageId) || document.body?.getAttribute('data-pageid') || '',
+      bodyClass: document.body?.className || '',
+      isBeforeOrIdle: unwrap(vm?.isBeforeOrIdle),
+      queueState: unwrap(vm?.QueueState) ?? unwrap(vm?.queueState),
+      queueNumber: String(unwrap(ticket?.queueNumber) ?? pick(['#MainPart_lbQueueNumber']) ?? ''),
+      waitTime: String(
+        unwrap(ticket?.whichIsIn) ||
+          pick(['#MainPart_lbWhichIsIn', '#MainPart_lbExpectedServiceTime']) ||
+          ''
+      )
+    }
+    return {
+      ...fromVm,
+      hasQueueUi: Boolean(
+        vm ||
+          document.querySelector('#queueit_overlay') ||
+          document.querySelector('#MainPart_lbWhichIsIn') ||
+          document.querySelector('#MainPart_divProgressbar') ||
+          document.querySelector('[id^="MainPart_"]') ||
+          document.querySelector('iframe[src*="queue-it.net"]')
+      ),
+      inner: document.body?.innerText?.slice(0, 12000) ?? ''
+    }
+  })
 }
 
 async function inspectPage(page, previous, wasInQueue) {
@@ -57,75 +168,67 @@ async function inspectPage(page, previous, wasInQueue) {
   const title = await page.title().catch(() => '')
 
   if (!url || url === 'about:blank' || url.startsWith('data:')) {
-    return { status: 'idle', host, url, title }
+    return { status: 'idle', host, url, title, statusLabel: 'Idle' }
   }
 
   let extracted
   try {
-    extracted = await page.evaluate(() => {
-      const pick = (selectors) => {
-        for (const sel of selectors) {
-          const el = document.querySelector(sel)
-          if (!el) continue
-          const text = el.innerText?.trim() || el.getAttribute('content') || ''
-          if (text) return text
-        }
-        return ''
+    const parts = []
+    for (const frame of page.frames()) {
+      try {
+        parts.push(await extractFrame(frame))
+      } catch {
+        /* cross-origin */
       }
-      return {
-        queueNumber: pick([
-          '#h2MainHeaderQueueNumber',
-          '#MainPart_lbUsersInLineAheadOfYou',
-          '[class*="queueNumber"]',
-          '[id*="queuePosition"]',
-          '[id*="queueNumber"]'
-        ]),
-        waitTime: pick([
-          '#MainPart_divWaitingTimeText',
-          '#MainPart_lbExpectedServiceTime',
-          '[class*="waitTime"]',
-          '[id*="waitTime"]',
-          '[class*="estimatedWait"]'
-        ]),
-        hasQueueUi: Boolean(
-          document.querySelector('#queueit_overlay') ||
-            document.querySelector('iframe[src*="queue-it.net"]') ||
-            document.querySelector('[id*="queueit" i]') ||
-            document.querySelector('#h2MainHeaderQueueNumber') ||
-            document.querySelector('#MainPart_divWaitingTimeText') ||
-            document.querySelector('#MainPart_lbUsersInLineAheadOfYou')
-        ),
-        inner: document.body?.innerText?.slice(0, 9000) ?? ''
-      }
-    })
+    }
+    extracted = mergeExtract(parts)
   } catch {
     return {
       status: previous === 'loading' ? 'loading' : 'error',
       host,
       url,
-      title
+      title,
+      statusLabel: previous === 'loading' ? 'Loading' : 'Error'
     }
   }
 
-  const onQueueHost = QUEUE_HOST.test(host) || /queueittoken=/i.test(url)
-  const waitingCopy = WAIT_COPY.test(extracted.inner)
-  const yourTurn = YOUR_TURN.test(extracted.inner)
-  const stillQueued = extracted.hasQueueUi || onQueueHost || waitingCopy
+  const inner = extracted.inner
+  const pageId = String(extracted.pageId || '').toLowerCase()
+  const bodyClass = String(extracted.bodyClass || '').toLowerCase()
+  const onQueueHost = QUEUE_HOST.test(host)
+  const hasToken = /queueittoken=/i.test(url)
+  const yourTurn = YOUR_TURN.test(inner)
+  const waitTime = formatWait(extracted.waitTime) || (LONG_WAIT.test(inner) ? 'more than an hour' : '')
 
   let status
-  if (yourTurn && !stillQueued) status = 'admitted'
-  else if (stillQueued && !yourTurn) status = 'in_queue'
-  else if (yourTurn) status = 'admitted'
-  else if (wasInQueue || previous === 'admitted') status = 'admitted'
-  else status = 'idle'
+  if (pageId === 'after' || pageId === 'exit' || extracted.queueState === 3 || yourTurn) {
+    status = 'admitted'
+  } else if (pageId === 'queue' || bodyClass.split(/\s+/).includes('queue') || extracted.queueState === 2) {
+    status = 'in_queue'
+  } else if (
+    extracted.isBeforeOrIdle === true ||
+    pageId === 'before' ||
+    pageId === 'idle' ||
+    bodyClass.split(/\s+/).includes('before') ||
+    extracted.queueState === 1
+  ) {
+    status = 'waiting_for_queue'
+  } else if (onQueueHost && extracted.hasQueueUi) {
+    status = IN_QUEUE_COPY.test(inner) ? 'in_queue' : 'waiting_for_queue'
+  } else if (wasInQueue || (hasToken && !onQueueHost)) {
+    status = 'admitted'
+  } else {
+    status = 'not_in_queue'
+  }
 
   return {
     status,
-    waitTime: extracted.waitTime || undefined,
+    waitTime: waitTime || undefined,
     queueNumber: extracted.queueNumber || undefined,
     host,
     url,
-    title
+    title,
+    statusLabel: statusLabel(status, waitTime)
   }
 }
 
@@ -158,11 +261,13 @@ function snapshot(fox) {
     host: fox.host,
     title: fox.title,
     status: fox.status,
+    statusLabel: fox.statusLabel || statusLabel(fox.status, fox.waitTime),
     waitTime: fox.waitTime,
     queueNumber: fox.queueNumber,
     screenshot: fox.screenshot,
     error: fox.error,
-    admittedFlash: Date.now() < fox.admittedFlashUntil
+    admittedFlash: Date.now() < fox.admittedFlashUntil,
+    focused: focusedId === fox.id
   }
 }
 
@@ -172,25 +277,11 @@ function emitUpdate() {
 
 async function prepareProfile(profileDir) {
   await mkdir(profileDir, { recursive: true })
-  await writeFile(
-    join(profileDir, 'xulstore.json'),
-    JSON.stringify({
-      'chrome://browser/content/browser.xhtml': {
-        'main-window': {
-          screenX: '-32000',
-          screenY: '-32000',
-          width: '1280',
-          height: '720',
-          sizemode: 'normal'
-        }
-      }
-    })
-  )
 }
 
-function killStrayPlaywrightFirefox() {
+function killStrayPlaywrightChromium() {
   try {
-    const exe = firefox.executablePath().replace(/'/g, "''")
+    const exe = chromium.executablePath().replace(/'/g, "''")
     execFileSync(
       'powershell.exe',
       [
@@ -223,7 +314,7 @@ async function spawnFox(foxId, profileDir) {
   spawning = true
   try {
     await prepareProfile(profileDir)
-    const context = await firefox.launchPersistentContext(profileDir, {
+    const context = await chromium.launchPersistentContext(profileDir, {
       headless: false,
       viewport: VIEWPORT,
       ignoreHTTPSErrors: true,
@@ -231,19 +322,23 @@ async function spawnFox(foxId, profileDir) {
       handleSIGTERM: false,
       handleSIGHUP: false,
       timeout: 90000,
-      ignoreDefaultArgs: ['-foreground'],
-      executablePath: firefox.executablePath(),
-      firefoxUserPrefs: {
-        'browser.tabs.warnOnClose': false,
-        'browser.sessionstore.resume_from_crash': false,
-        'browser.shell.checkDefaultBrowser': false,
-        'toolkit.telemetry.reportingpolicy.firstRun': false,
-        'startup.homepage_welcome_url': '',
-        'startup.homepage_welcome_url.additional': '',
-        'browser.startup.homepage_override.mstone': 'ignore',
-        'datareporting.policy.dataSubmissionEnabled': false,
-        'datareporting.policy.dataSubmissionPolicyBypassNotification': true
-      }
+      executablePath: chromium.executablePath(),
+      ignoreDefaultArgs: ['--enable-automation'],
+      args: [
+        `--window-position=-32000,-32000`,
+        `--window-size=${VIEWPORT.width},${VIEWPORT.height}`,
+        '--disable-blink-features=AutomationControlled',
+        '--disable-infobars',
+        '--no-first-run',
+        '--no-default-browser-check',
+        '--disable-session-crashed-bubble',
+        '--hide-crash-restore-bubble',
+        '--disable-features=Translate,MediaRouter,OptimizationHints',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-renderer-backgrounding',
+        '--disable-background-timer-throttling',
+        '--app-user-model-id=com.foxbox.app'
+      ]
     })
     const pid = getBrowserPid(context)
     send({ type: 'event', event: 'browserPid', payload: { foxId, pid, profileDir } })
@@ -255,6 +350,7 @@ async function spawnFox(foxId, profileDir) {
       context,
       page,
       status: 'idle',
+      statusLabel: 'Idle',
       wasInQueue: false,
       url: page.url(),
       host: '',
@@ -318,26 +414,33 @@ async function refreshFox(fox) {
   if (!page) {
     fox.status = 'error'
     fox.error = 'No page'
+    fox.statusLabel = 'Error'
     return
   }
   if (fox.navigating) {
     fox.status = 'loading'
+    fox.statusLabel = 'Loading'
   } else {
     const previous = fox.status
     const read = await inspectPage(page, previous, fox.wasInQueue)
-    if (read.status === 'in_queue') fox.wasInQueue = true
+    if (read.status === 'in_queue' || read.status === 'waiting_for_queue') fox.wasInQueue = true
     fox.status = read.status
+    fox.statusLabel = read.statusLabel
     fox.waitTime = read.waitTime
     fox.queueNumber = read.queueNumber
     fox.url = read.url
     fox.host = read.host
     fox.title = read.title
     fox.error = read.status === 'error' ? fox.error || 'Could not read page' : undefined
+    if (isQueuePopEdge(previous, fox.status)) {
+      send({ type: 'event', event: 'queuePopped', payload: fox.id })
+    }
     if (isAdmissionEdge(previous, fox.status)) {
       fox.admittedFlashUntil = Date.now() + 12000
       send({ type: 'event', event: 'admitted', payload: fox.id })
     }
   }
+  if (pausedIds.has(fox.id)) return
   try {
     const quality = focusedId === fox.id ? 58 : 38
     const buffer = await page.screenshot({ type: 'jpeg', quality })
@@ -430,6 +533,9 @@ async function handle(msg) {
       await onPages(msg.foxId, (page) => page.mouse.wheel(msg.dx, msg.dy))
     } else if (cmd === 'setFocused') {
       focusedId = msg.foxId
+    } else if (cmd === 'setPaused') {
+      if (msg.paused) pausedIds.add(String(msg.foxId))
+      else pausedIds.delete(String(msg.foxId))
     } else if (cmd === 'shutdown') {
       shuttingDown = true
       const ids = [...instances.keys()]
@@ -471,6 +577,6 @@ rl.on('line', (line) => {
   })
 })
 
-killStrayPlaywrightFirefox()
+killStrayPlaywrightChromium()
 scheduleTick()
-send({ type: 'event', event: 'ready', payload: { executable: firefox.executablePath() } })
+send({ type: 'event', event: 'ready', payload: { executable: chromium.executablePath() } })
