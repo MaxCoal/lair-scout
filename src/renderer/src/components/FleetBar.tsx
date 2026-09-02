@@ -4,22 +4,26 @@ type Props = {
   url: string
   count: number
   muted: boolean
+  driveAll: boolean
   onUrl: (value: string) => void
   onSendAll: (event: FormEvent) => void
   onSpawn: () => void
   onKillLast: () => void
   onToggleMute: () => void
+  onToggleDriveAll: () => void
 }
 
 export default function FleetBar({
   url,
   count,
   muted,
+  driveAll,
   onUrl,
   onSendAll,
   onSpawn,
   onKillLast,
-  onToggleMute
+  onToggleMute,
+  onToggleDriveAll
 }: Props) {
   return (
     <header className="topbar">
@@ -54,6 +58,9 @@ export default function FleetBar({
             +
           </button>
         </div>
+        <button className={`btn ghost ${driveAll ? 'active' : ''}`} type="button" onClick={onToggleDriveAll}>
+          Drive all
+        </button>
         <button className={`btn ghost ${muted ? 'active' : ''}`} type="button" onClick={onToggleMute}>
           {muted ? 'Alerts off' : 'Alerts on'}
         </button>

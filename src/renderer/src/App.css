@@ -221,6 +221,16 @@ input {
   overflow: auto;
 }
 
+.hint {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--fox-dim);
+  border: 1px solid rgba(249, 115, 22, 0.25);
+  color: #fdba74;
+  font-size: 13px;
+}
+
 .warn {
   margin: 0 0 12px;
   padding: 10px 12px;
@@ -268,6 +278,16 @@ input {
 
 .tile img {
   aspect-ratio: 16 / 10;
+}
+
+.tile.herd img,
+.focus-stage.herd img {
+  cursor: crosshair;
+}
+
+.tile.herd,
+.grid {
+  overscroll-behavior: contain;
 }
 
 .placeholder {
@@ -358,8 +378,9 @@ input {
   outline: none;
 }
 
-.focus-stage:focus {
-  border-color: rgba(249, 115, 22, 0.55);
+.focus-stage.live {
+  min-height: 420px;
+  background: #07080a;
 }
 
 @keyframes pulse {

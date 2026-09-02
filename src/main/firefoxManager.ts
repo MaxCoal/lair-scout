@@ -1,17 +1,22 @@
-import { BrowserWindow, Notification, app } from 'electron'
+import { BrowserWindow, Notification, app, screen } from 'electron'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { join } from 'node:path'
 import type { InstanceSnapshot } from '@shared/types'
-import { findWindowByTitle, hideWindow, showWindow } from './win32'
+import { findFoxWindow, hideFoxWindow, placeFoxWindow, showWindow, stopWin32Host } from './win32'
 
 const DEFAULT_COUNT = 2
 
 type WindowState = {
   hwnd: number
+  pid: number
+  profileDir: string
   poppedOut: boolean
+  interacting: boolean
 }
+
+type StageRect = { x: number; y: number; width: number; height: number }
 
 export class FirefoxManager {
   private window: BrowserWindow | null = null
@@ -23,6 +28,8 @@ export class FirefoxManager {
   private windows = new Map<string, WindowState>()
   private muted = false
   private shuttingDown = false
+  private dockTimer: NodeJS.Timeout | null = null
+  private stageRect: StageRect | null = null
   private ready: Promise<void>
   private markReady: () => void = () => undefined
 
@@ -35,6 +42,13 @@ export class FirefoxManager {
   attach(window: BrowserWindow): void {
     this.window = window
     this.ensureWorker()
+    this.armDockTimer()
+    window.on('move', () => {
+      void this.relayoutInteract()
+    })
+    window.on('resize', () => {
+      void this.relayoutInteract()
+    })
   }
 
   setMuted(muted: boolean): void {
@@ -64,15 +78,18 @@ export class FirefoxManager {
   async spawn(): Promise<string> {
     await this.ready
     const id = String(this.nextId++)
-    const profileDir = join(app.getPath('userData'), 'foxes', id)
-    await this.call('spawn', { foxId: id, profileDir })
-    let hwnd = 0
-    for (let attempt = 0; attempt < 12 && !hwnd; attempt += 1) {
-      hwnd = await findWindowByTitle(`FoxBox-${id}`)
-      if (!hwnd) await sleep(250)
+    const profileDir = join(app.getPath('userData'), 'foxes', `${id}-${Date.now()}`)
+    this.windows.set(id, { hwnd: 0, pid: 0, profileDir, poppedOut: false, interacting: false })
+    const result = (await this.call('spawn', { foxId: id, profileDir }, 120000)) as { pid?: number }
+    const state = this.windows.get(id)
+    if (state && result?.pid) state.pid = result.pid
+    if (state) {
+      state.hwnd = await hideFoxWindow({
+        pid: state.pid,
+        hwnd: state.hwnd,
+        title: `FoxBox-${id}`
+      })
     }
-    if (hwnd) await hideWindow(hwnd)
-    this.windows.set(id, { hwnd, poppedOut: false })
     this.broadcast()
     return id
   }
@@ -95,31 +112,59 @@ export class FirefoxManager {
     await this.call('reload', { foxId: id })
   }
 
-  async click(
+  click(
     id: string,
     nx: number,
     ny: number,
     button: 'left' | 'right' | 'middle' = 'left',
     double = false
-  ): Promise<void> {
-    await this.call('click', { foxId: id, nx, ny, button, double })
+  ): void {
+    this.fire('click', { foxId: id, nx, ny, button, double })
   }
 
-  async move(id: string, nx: number, ny: number): Promise<void> {
-    await this.call('move', { foxId: id, nx, ny })
+  move(id: string, nx: number, ny: number): void {
+    this.fire('move', { foxId: id, nx, ny })
   }
 
-  async key(id: string, key: string, type: 'down' | 'up' | 'press'): Promise<void> {
-    await this.call('key', { foxId: id, key, keyType: type })
+  key(id: string, key: string, type: 'down' | 'up' | 'press'): void {
+    this.fire('key', { foxId: id, key, keyType: type })
   }
 
-  async scroll(id: string, dx: number, dy: number): Promise<void> {
-    await this.call('scroll', { foxId: id, dx, dy })
+  scroll(id: string, dx: number, dy: number): void {
+    this.fire('scroll', { foxId: id, dx, dy })
+  }
+
+  async interact(id: string, rect: StageRect): Promise<void> {
+    this.stageRect = rect
+    for (const [otherId, other] of this.windows) {
+      if (otherId !== id && other.interacting) {
+        other.interacting = false
+        await hideFoxWindow({ pid: other.pid, hwnd: other.hwnd, title: `FoxBox-${otherId}` })
+      }
+    }
+    const state = this.windows.get(id)
+    if (!state) return
+    state.interacting = true
+    state.poppedOut = false
+    const placed = await this.placeState(id, state, rect)
+    if (placed) state.hwnd = placed
+    this.broadcast()
+  }
+
+  async stopInteract(id: string): Promise<void> {
+    const state = this.windows.get(id)
+    if (!state) return
+    state.interacting = false
+    state.hwnd = await hideFoxWindow({ pid: state.pid, hwnd: state.hwnd, title: `FoxBox-${id}` })
+    this.broadcast()
   }
 
   async popOut(id: string): Promise<void> {
     const state = this.windows.get(id)
     if (!state) return
+    state.interacting = false
+    const hwnd = await findFoxWindow({ pid: state.pid, hwnd: state.hwnd, title: `FoxBox-${id}` })
+    if (hwnd) state.hwnd = hwnd
     if (state.hwnd) await showWindow(state.hwnd)
     state.poppedOut = true
     this.broadcast()
@@ -128,13 +173,15 @@ export class FirefoxManager {
   async dock(id: string): Promise<void> {
     const state = this.windows.get(id)
     if (!state) return
-    if (state.hwnd) await hideWindow(state.hwnd)
+    state.interacting = false
     state.poppedOut = false
+    state.hwnd = await hideFoxWindow({ pid: state.pid, hwnd: state.hwnd, title: `FoxBox-${id}` })
     this.broadcast()
   }
 
   async shutdown(): Promise<void> {
     this.shuttingDown = true
+    if (this.dockTimer) clearInterval(this.dockTimer)
     try {
       await this.call('shutdown', {})
     } catch {
@@ -142,6 +189,46 @@ export class FirefoxManager {
     }
     this.worker?.kill()
     this.worker = null
+    stopWin32Host()
+  }
+
+  private async placeState(id: string, state: WindowState, rect: StageRect): Promise<number> {
+    if (!this.window || this.window.isDestroyed()) return 0
+    const content = this.window.getContentBounds()
+    const dip = {
+      x: content.x + rect.x,
+      y: content.y + rect.y,
+      width: Math.max(100, rect.width),
+      height: Math.max(80, rect.height)
+    }
+    const phys = screen.dipToScreenRect(this.window, dip)
+    return placeFoxWindow({ pid: state.pid, hwnd: state.hwnd, title: `FoxBox-${id}` }, phys)
+  }
+
+  private async relayoutInteract(): Promise<void> {
+    if (!this.stageRect) return
+    for (const [id, state] of this.windows) {
+      if (!state.interacting) continue
+      const hwnd = await this.placeState(id, state, this.stageRect)
+      if (hwnd) state.hwnd = hwnd
+    }
+  }
+
+  private armDockTimer(): void {
+    if (this.dockTimer) return
+    this.dockTimer = setInterval(() => {
+      if (this.shuttingDown) return
+      for (const [id, state] of this.windows) {
+        if (state.poppedOut || state.interacting) continue
+        void hideFoxWindow({
+          pid: state.pid,
+          hwnd: state.hwnd,
+          title: `FoxBox-${id}`
+        }).then((hwnd) => {
+          if (hwnd) state.hwnd = hwnd
+        })
+      }
+    }, 2000)
   }
 
   private ensureWorker(): void {
@@ -202,6 +289,22 @@ export class FirefoxManager {
       return
     }
 
+    if (message.type === 'event' && message.event === 'browserPid') {
+      const payload = message.payload as { foxId: string; pid: number }
+      const state = this.windows.get(String(payload.foxId))
+      if (state) {
+        state.pid = Number(payload.pid) || 0
+        void hideFoxWindow({
+          pid: state.pid,
+          hwnd: state.hwnd,
+          title: `FoxBox-${payload.foxId}`
+        }).then((hwnd) => {
+          if (hwnd) state.hwnd = hwnd
+        })
+      }
+      return
+    }
+
     if (message.type === 'event' && message.event === 'ready') {
       this.markReady()
       return
@@ -213,7 +316,8 @@ export class FirefoxManager {
         const win = this.windows.get(fox.id)
         return {
           ...fox,
-          poppedOut: win?.poppedOut ?? false
+          poppedOut: win?.poppedOut ?? false,
+          interacting: win?.interacting ?? false
         }
       })
       this.broadcast()
@@ -232,7 +336,12 @@ export class FirefoxManager {
     }
   }
 
-  private call(cmd: string, payload: Record<string, unknown>): Promise<unknown> {
+  private fire(cmd: string, payload: Record<string, unknown>): void {
+    this.ensureWorker()
+    this.worker?.stdin.write(`${JSON.stringify({ requestId: 0, cmd, ...payload })}\n`)
+  }
+
+  private call(cmd: string, payload: Record<string, unknown>, timeoutMs = 60000): Promise<unknown> {
     this.ensureWorker()
     const requestId = this.nextRequest++
     return new Promise((resolve, reject) => {
@@ -243,7 +352,7 @@ export class FirefoxManager {
           this.pending.delete(requestId)
           reject(new Error(`Timed out: ${cmd}`))
         }
-      }, 60000)
+      }, timeoutMs)
     })
   }
 

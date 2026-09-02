@@ -14,12 +14,22 @@ const api: FoxboxAPI = {
   gotoAll: (url) => ipcRenderer.invoke('instances:gotoAll', url),
   gotoOne: (id, url) => ipcRenderer.invoke('instances:gotoOne', id, url),
   reload: (id) => ipcRenderer.invoke('instances:reload', id),
-  click: (payload: ClickPayload) => ipcRenderer.invoke('instances:click', payload),
-  key: (payload: KeyPayload) => ipcRenderer.invoke('instances:key', payload),
-  scroll: (payload: ScrollPayload) => ipcRenderer.invoke('instances:scroll', payload),
-  move: (payload: MovePayload) => ipcRenderer.invoke('instances:move', payload),
+  click: (payload: ClickPayload) => {
+    ipcRenderer.send('instances:click', payload)
+  },
+  key: (payload: KeyPayload) => {
+    ipcRenderer.send('instances:key', payload)
+  },
+  scroll: (payload: ScrollPayload) => {
+    ipcRenderer.send('instances:scroll', payload)
+  },
+  move: (payload: MovePayload) => {
+    ipcRenderer.send('instances:move', payload)
+  },
   popOut: (id) => ipcRenderer.invoke('instances:popOut', id),
   dock: (id) => ipcRenderer.invoke('instances:dock', id),
+  interact: (id, rect) => ipcRenderer.invoke('instances:interact', id, rect),
+  stopInteract: (id) => ipcRenderer.invoke('instances:stopInteract', id),
   setMuted: (muted) => ipcRenderer.invoke('alerts:setMuted', muted),
   setFocused: (id) => ipcRenderer.invoke('instances:setFocused', id),
   onUpdate: (cb) => {

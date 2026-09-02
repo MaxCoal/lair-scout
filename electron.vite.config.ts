@@ -12,6 +12,7 @@ function copyWin32Script(): Plugin {
   const copy = (): void => {
     mkdirSync('out/main', { recursive: true })
     cpSync('src/main/win32.ps1', 'out/main/win32.ps1')
+    cpSync('src/main/win32-host.ps1', 'out/main/win32-host.ps1')
     cpSync('src/main/foxWorker.cjs', 'out/main/foxWorker.cjs')
   }
   return {

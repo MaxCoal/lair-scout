@@ -3,16 +3,22 @@ import InstanceTile from './InstanceTile'
 
 type Props = {
   instances: InstanceSnapshot[]
-  url: string
+  driveAll: boolean
   onFocus: (id: string) => void
   onGotoOne: (id: string) => void
 }
 
-export default function InstanceGrid({ instances, url, onFocus, onGotoOne }: Props) {
+export default function InstanceGrid({ instances, driveAll, onFocus, onGotoOne }: Props) {
   return (
     <div className="grid">
       {instances.map((fox) => (
-        <InstanceTile key={fox.id} fox={fox} url={url} onFocus={onFocus} onGotoOne={onGotoOne} />
+        <InstanceTile
+          key={fox.id}
+          fox={fox}
+          driveAll={driveAll}
+          onFocus={onFocus}
+          onGotoOne={onGotoOne}
+        />
       ))}
     </div>
   )

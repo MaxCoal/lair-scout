@@ -1,36 +1,50 @@
 import { useEffect, useRef } from 'react'
 import type { InstanceSnapshot } from '@shared/types'
 import { StatusChip, statusLine } from './status'
+import { eventCoords, mouseButton, targetId } from '../input'
 
 type Props = {
   fox: InstanceSnapshot
+  driveAll: boolean
+  fleetCount: number
+  live: boolean
   onBack: () => void
 }
 
-function coords(event: React.MouseEvent<HTMLImageElement>): { nx: number; ny: number } | null {
-  const img = event.currentTarget
-  const rect = img.getBoundingClientRect()
-  const { naturalWidth: nw, naturalHeight: nh } = img
-  if (!nw || !nh) return null
-  const scale = Math.min(rect.width / nw, rect.height / nh)
-  const dw = nw * scale
-  const dh = nh * scale
-  const ox = rect.left + (rect.width - dw) / 2
-  const oy = rect.top + (rect.height - dh) / 2
-  const nx = (event.clientX - ox) / dw
-  const ny = (event.clientY - oy) / dh
-  if (nx < 0 || ny < 0 || nx > 1 || ny > 1) return null
-  return { nx, ny }
-}
-
-export default function FocusView({ fox, onBack }: Props) {
+export default function FocusView({ fox, driveAll, fleetCount, live, onBack }: Props) {
   const stageRef = useRef<HTMLDivElement>(null)
+  const lastMove = useRef(0)
 
   useEffect(() => {
     stageRef.current?.focus()
   }, [fox.id])
 
   useEffect(() => {
+    if (!live) return undefined
+    const report = (): void => {
+      const el = stageRef.current
+      if (!el) return
+      const rect = el.getBoundingClientRect()
+      void window.foxbox.interact(fox.id, {
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height
+      })
+    }
+    report()
+    const observer = new ResizeObserver(report)
+    if (stageRef.current) observer.observe(stageRef.current)
+    window.addEventListener('resize', report)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', report)
+      void window.foxbox.stopInteract(fox.id)
+    }
+  }, [fox.id, live])
+
+  useEffect(() => {
+    if (live || driveAll) return undefined
     const onKey = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') {
         onBack()
@@ -51,14 +65,24 @@ export default function FocusView({ fox, onBack }: Props) {
       window.removeEventListener('keydown', onKey)
       window.removeEventListener('keyup', onKey)
     }
-  }, [fox.id, onBack])
+  }, [driveAll, fox.id, live, onBack])
+
+  const id = targetId(driveAll && !live, fox.id)
 
   return (
     <div className="focus">
       <div className="focus-bar">
         <div>
-          <strong>Fox {fox.id}</strong>
-          <div className="mono">{statusLine(fox)}</div>
+          <strong>
+            {live ? `Live · Fox ${fox.id}` : driveAll ? `All foxes · showing Fox ${fox.id}` : `Fox ${fox.id}`}
+          </strong>
+          <div className="mono">
+            {live
+              ? 'Click and type directly in this window'
+              : driveAll
+                ? `Mirroring to ${fleetCount}`
+                : statusLine(fox)}
+          </div>
         </div>
         <div className="top-actions">
           <StatusChip status={fox.status} />
@@ -80,31 +104,36 @@ export default function FocusView({ fox, onBack }: Props) {
         </div>
       </div>
       <div
-        className="focus-stage"
+        className={`focus-stage ${driveAll && !live ? 'herd' : ''} ${live ? 'live' : ''}`}
         tabIndex={0}
         ref={stageRef}
         onWheel={(event) => {
+          if (live) return
           event.preventDefault()
-          void window.foxbox.scroll({ id: fox.id, dx: event.deltaX, dy: event.deltaY })
+          void window.foxbox.scroll({ id, dx: event.deltaX, dy: event.deltaY })
         }}
         onContextMenu={(event) => event.preventDefault()}
       >
-        {fox.screenshot ? (
+        {live ? (
+          <div className="placeholder">Live Firefox sits in this panel — click it directly.</div>
+        ) : fox.screenshot ? (
           <img
             src={fox.screenshot}
-            alt={`Fox ${fox.id} live view`}
+            alt={driveAll ? 'Herd live view' : `Fox ${fox.id} live view`}
             onMouseMove={(event) => {
-              const point = coords(event)
-              if (point) void window.foxbox.move({ id: fox.id, ...point })
+              const now = Date.now()
+              if (now - lastMove.current < 32) return
+              lastMove.current = now
+              const point = eventCoords(event)
+              if (point) void window.foxbox.move({ id, ...point })
             }}
             onMouseDown={(event) => {
-              const point = coords(event)
+              const point = eventCoords(event)
               if (!point) return
-              const button = event.button === 2 ? 'right' : event.button === 1 ? 'middle' : 'left'
               void window.foxbox.click({
-                id: fox.id,
+                id,
                 ...point,
-                button,
+                button: mouseButton(event),
                 double: event.detail === 2
               })
             }}

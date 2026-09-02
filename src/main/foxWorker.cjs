@@ -4,7 +4,9 @@ delete process.env.PLAYWRIGHT_BROWSERS_PATH
 delete process.env.ELECTRON_RUN_AS_NODE
 
 const { firefox } = require('playwright')
-const { mkdir, rm } = require('node:fs/promises')
+const { mkdir, rm, writeFile } = require('node:fs/promises')
+const { join } = require('node:path')
+const { execFileSync } = require('node:child_process')
 const readline = require('node:readline')
 
 const VIEWPORT = { width: 1280, height: 720 }
@@ -20,6 +22,7 @@ const instances = new Map()
 let focusedId = null
 let shuttingDown = false
 let ticking = false
+let spawning = false
 
 function send(message) {
   process.stdout.write(`${JSON.stringify(message)}\n`)
@@ -133,6 +136,21 @@ function pageOf(fox) {
   return page.isClosed() ? null : page
 }
 
+function targets(foxId) {
+  if (foxId === '*') return [...instances.values()]
+  const fox = instances.get(foxId)
+  return fox ? [fox] : []
+}
+
+async function onPages(foxId, fn) {
+  await Promise.allSettled(
+    targets(foxId).map(async (fox) => {
+      const page = pageOf(fox)
+      if (page) await fn(page)
+    })
+  )
+}
+
 function snapshot(fox) {
   return {
     id: fox.id,
@@ -152,57 +170,119 @@ function emitUpdate() {
   send({ type: 'event', event: 'update', payload: [...instances.values()].map(snapshot) })
 }
 
-async function spawnFox(foxId, profileDir) {
+async function prepareProfile(profileDir) {
   await mkdir(profileDir, { recursive: true })
-  const context = await firefox.launchPersistentContext(profileDir, {
-    headless: false,
-    viewport: VIEWPORT,
-    ignoreHTTPSErrors: true,
-    handleSIGINT: false,
-    handleSIGTERM: false,
-    handleSIGHUP: false,
-    executablePath: firefox.executablePath(),
-    firefoxUserPrefs: {
-      'browser.tabs.warnOnClose': false,
-      'browser.sessionstore.resume_from_crash': false,
-      'browser.shell.checkDefaultBrowser': false,
-      'toolkit.telemetry.reportingpolicy.firstRun': false,
-      'startup.homepage_welcome_url': '',
-      'startup.homepage_welcome_url.additional': '',
-      'browser.startup.homepage_override.mstone': 'ignore',
-      'datareporting.policy.dataSubmissionEnabled': false,
-      'datareporting.policy.dataSubmissionPolicyBypassNotification': true
-    }
-  })
-  const page = context.pages()[0] ?? (await context.newPage())
-  await page.setViewportSize(VIEWPORT)
-  await page.goto(
-    `data:text/html,<html><head><title>FoxBox-${foxId}</title></head><body style="margin:0;background:#0c0d10;color:#e8eaed;font-family:Segoe UI,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh"><div style="text-align:center"><div style="letter-spacing:.2em;text-transform:uppercase;color:#f97316">FoxBox</div><h1>Fox ${foxId}</h1><p style="color:#8b919a">Ready. Use Send all to navigate.</p></div></body></html>`,
-    { waitUntil: 'domcontentloaded' }
+  await writeFile(
+    join(profileDir, 'xulstore.json'),
+    JSON.stringify({
+      'chrome://browser/content/browser.xhtml': {
+        'main-window': {
+          screenX: '-32000',
+          screenY: '-32000',
+          width: '1280',
+          height: '720',
+          sizemode: 'normal'
+        }
+      }
+    })
   )
-  const fox = {
-    id: foxId,
-    profileDir,
-    context,
-    page,
-    status: 'idle',
-    wasInQueue: false,
-    url: page.url(),
-    host: '',
-    title: `Fox ${foxId}`,
-    admittedFlashUntil: 0,
-    navigating: false
+}
+
+function killStrayPlaywrightFirefox() {
+  try {
+    const exe = firefox.executablePath().replace(/'/g, "''")
+    execFileSync(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-Command',
+        `Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq '${exe}' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`
+      ],
+      { timeout: 12000, windowsHide: true }
+    )
+  } catch {
+    /* ignore */
   }
-  context.on('page', (newPage) => {
-    fox.page = newPage
-  })
-  page.on('crash', () => {
-    fox.status = 'error'
-    fox.error = 'Page crashed'
+}
+
+function getBrowserPid(context) {
+  try {
+    const browser = typeof context.browser === 'function' ? context.browser() : null
+    if (!browser) return 0
+    const procOrFn = browser.process
+    const proc = typeof procOrFn === 'function' ? procOrFn.call(browser) : procOrFn
+    const pid = proc && proc.pid
+    return Number(pid) || 0
+  } catch (error) {
+    console.error('pid lookup failed', error)
+    return 0
+  }
+}
+
+async function spawnFox(foxId, profileDir) {
+  spawning = true
+  try {
+    await prepareProfile(profileDir)
+    const context = await firefox.launchPersistentContext(profileDir, {
+      headless: false,
+      viewport: VIEWPORT,
+      ignoreHTTPSErrors: true,
+      handleSIGINT: false,
+      handleSIGTERM: false,
+      handleSIGHUP: false,
+      timeout: 90000,
+      ignoreDefaultArgs: ['-foreground'],
+      executablePath: firefox.executablePath(),
+      firefoxUserPrefs: {
+        'browser.tabs.warnOnClose': false,
+        'browser.sessionstore.resume_from_crash': false,
+        'browser.shell.checkDefaultBrowser': false,
+        'toolkit.telemetry.reportingpolicy.firstRun': false,
+        'startup.homepage_welcome_url': '',
+        'startup.homepage_welcome_url.additional': '',
+        'browser.startup.homepage_override.mstone': 'ignore',
+        'datareporting.policy.dataSubmissionEnabled': false,
+        'datareporting.policy.dataSubmissionPolicyBypassNotification': true
+      }
+    })
+    const pid = getBrowserPid(context)
+    send({ type: 'event', event: 'browserPid', payload: { foxId, pid, profileDir } })
+    const page = context.pages()[0] ?? (await context.newPage())
+    await page.setViewportSize(VIEWPORT)
+    const fox = {
+      id: foxId,
+      profileDir,
+      context,
+      page,
+      status: 'idle',
+      wasInQueue: false,
+      url: page.url(),
+      host: '',
+      title: `Fox ${foxId}`,
+      admittedFlashUntil: 0,
+      navigating: false
+    }
+    context.on('page', (newPage) => {
+      fox.page = newPage
+    })
+    page.on('crash', () => {
+      fox.status = 'error'
+      fox.error = 'Page crashed'
+      emitUpdate()
+    })
+    instances.set(foxId, fox)
     emitUpdate()
-  })
-  instances.set(foxId, fox)
-  emitUpdate()
+    await page.goto(
+      `data:text/html,<html><head><title>FoxBox-${foxId}</title></head><body style="margin:0;background:#0c0d10;color:#e8eaed;font-family:Segoe UI,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh"><div style="text-align:center"><div style="letter-spacing:.2em;text-transform:uppercase;color:#f97316">FoxBox</div><h1>Fox ${foxId}</h1><p style="color:#8b919a">Ready. Use Send all to navigate.</p></div></body></html>`,
+      { waitUntil: 'domcontentloaded' }
+    )
+    fox.url = page.url()
+    fox.title = await page.title().catch(() => fox.title)
+    emitUpdate()
+    return { foxId, pid }
+  } finally {
+    spawning = false
+  }
 }
 
 async function killFox(foxId) {
@@ -268,7 +348,7 @@ async function refreshFox(fox) {
 }
 
 async function tick() {
-  if (ticking || shuttingDown) {
+  if (ticking || shuttingDown || spawning) {
     scheduleTick()
     return
   }
@@ -294,8 +374,7 @@ async function handle(msg) {
   try {
     let result
     if (cmd === 'spawn') {
-      await spawnFox(msg.foxId, msg.profileDir)
-      result = { foxId: msg.foxId }
+      result = await spawnFox(msg.foxId, msg.profileDir)
     } else if (cmd === 'kill') {
       await killFox(msg.foxId)
     } else if (cmd === 'goto') {
@@ -323,22 +402,20 @@ async function handle(msg) {
         }
       }
     } else if (cmd === 'click') {
-      const fox = instances.get(msg.foxId)
-      const page = fox ? pageOf(fox) : null
-      if (page) {
-        const x = clamp(msg.nx, 0, 1) * VIEWPORT.width
-        const y = clamp(msg.ny, 0, 1) * VIEWPORT.height
-        if (msg.double) await page.mouse.dblclick(x, y, { button: msg.button || 'left' })
-        else await page.mouse.click(x, y, { button: msg.button || 'left' })
-      }
+      const x = clamp(msg.nx, 0, 1) * VIEWPORT.width
+      const y = clamp(msg.ny, 0, 1) * VIEWPORT.height
+      const button = msg.button || 'left'
+      await onPages(msg.foxId, async (page) => {
+        if (msg.double) await page.mouse.dblclick(x, y, { button })
+        else await page.mouse.click(x, y, { button })
+      })
     } else if (cmd === 'move') {
-      const fox = instances.get(msg.foxId)
-      const page = fox ? pageOf(fox) : null
-      if (page) await page.mouse.move(clamp(msg.nx, 0, 1) * VIEWPORT.width, clamp(msg.ny, 0, 1) * VIEWPORT.height)
+      const x = clamp(msg.nx, 0, 1) * VIEWPORT.width
+      const y = clamp(msg.ny, 0, 1) * VIEWPORT.height
+      await onPages(msg.foxId, (page) => page.mouse.move(x, y))
     } else if (cmd === 'key') {
-      const fox = instances.get(msg.foxId)
-      const page = fox ? pageOf(fox) : null
-      if (page && msg.key) {
+      await onPages(msg.foxId, async (page) => {
+        if (!msg.key) return
         try {
           if (msg.keyType === 'down') await page.keyboard.down(msg.key)
           else if (msg.keyType === 'up') await page.keyboard.up(msg.key)
@@ -348,11 +425,9 @@ async function handle(msg) {
             await page.keyboard.insertText(msg.key).catch(() => undefined)
           }
         }
-      }
+      })
     } else if (cmd === 'scroll') {
-      const fox = instances.get(msg.foxId)
-      const page = fox ? pageOf(fox) : null
-      if (page) await page.mouse.wheel(msg.dx, msg.dy)
+      await onPages(msg.foxId, (page) => page.mouse.wheel(msg.dx, msg.dy))
     } else if (cmd === 'setFocused') {
       focusedId = msg.foxId
     } else if (cmd === 'shutdown') {
@@ -362,22 +437,40 @@ async function handle(msg) {
     } else {
       throw new Error(`Unknown command ${cmd}`)
     }
-    send({ type: 'result', requestId, ok: true, result })
+    if (requestId) send({ type: 'result', requestId, ok: true, result })
   } catch (error) {
-    send({
-      type: 'result',
-      requestId,
-      ok: false,
-      error: error instanceof Error ? error.message : String(error)
-    })
+    if (requestId) {
+      send({
+        type: 'result',
+        requestId,
+        ok: false,
+        error: error instanceof Error ? error.message : String(error)
+      })
+    } else {
+      console.error(error)
+    }
   }
 }
 
+const INPUT_CMDS = new Set(['move', 'click', 'key', 'scroll'])
 const rl = readline.createInterface({ input: process.stdin })
+let chain = Promise.resolve()
 rl.on('line', (line) => {
   if (!line.trim()) return
-  void handle(JSON.parse(line))
+  const msg = JSON.parse(line)
+  if (INPUT_CMDS.has(msg.cmd)) {
+    if (spawning) {
+      if (msg.requestId) send({ type: 'result', requestId: msg.requestId, ok: true })
+      return
+    }
+    void handle(msg)
+    return
+  }
+  chain = chain.then(() => handle(msg)).catch((error) => {
+    console.error(error)
+  })
 })
 
+killStrayPlaywrightFirefox()
 scheduleTick()
 send({ type: 'event', event: 'ready', payload: { executable: firefox.executablePath() } })

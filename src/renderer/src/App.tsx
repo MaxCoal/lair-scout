@@ -26,7 +26,9 @@ export default function App() {
   const [instances, setInstances] = useState<InstanceSnapshot[]>([])
   const [url, setUrl] = useState(DEFAULT_URL)
   const [focusedId, setFocusedId] = useState<string | null>(null)
+  const [liveId, setLiveId] = useState<string | null>(null)
   const [muted, setMuted] = useState(false)
+  const [driveAll, setDriveAll] = useState(false)
 
   useEffect(() => {
     return window.foxbox.onUpdate(setInstances)
@@ -41,6 +43,31 @@ export default function App() {
   useEffect(() => {
     void window.foxbox.setFocused(focusedId)
   }, [focusedId])
+
+  useEffect(() => {
+    if (!driveAll || liveId) return undefined
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return
+      if (event.key === 'Escape' && focusedId) {
+        setLiveId(null)
+        setFocusedId(null)
+        return
+      }
+      if (event.type === 'keydown' && event.repeat) return
+      event.preventDefault()
+      void window.foxbox.key({
+        id: '*',
+        key: event.key,
+        type: event.type === 'keyup' ? 'up' : 'down'
+      })
+    }
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('keyup', onKey)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('keyup', onKey)
+    }
+  }, [driveAll, focusedId, liveId])
 
   const focused = useMemo(
     () => instances.find((fox) => fox.id === focusedId) ?? null,
@@ -58,6 +85,7 @@ export default function App() {
         url={url}
         count={instances.length}
         muted={muted}
+        driveAll={driveAll}
         onUrl={setUrl}
         onSendAll={sendAll}
         onSpawn={() => window.foxbox.spawn()}
@@ -70,14 +98,19 @@ export default function App() {
           setMuted(next)
           void window.foxbox.setMuted(next)
         }}
+        onToggleDriveAll={() => setDriveAll((value) => !value)}
       />
       <div className="workspace">
         <Sidebar
           instances={instances}
           focusedId={focusedId}
-          onFocus={setFocusedId}
+          onFocus={(id) => {
+            setFocusedId(id)
+            setLiveId(id)
+          }}
           onKill={(id) => {
             if (focusedId === id) setFocusedId(null)
+            if (liveId === id) setLiveId(null)
             void window.foxbox.kill(id)
           }}
         />
@@ -85,13 +118,28 @@ export default function App() {
           {instances.length >= 6 ? (
             <p className="warn">Each Firefox uses a lot of RAM. Scale down if the machine starts swapping.</p>
           ) : null}
+          {driveAll && !focused ? (
+            <p className="hint">Drive all is on. Click, scroll, or type on any preview to control every fox.</p>
+          ) : null}
           {focused ? (
-            <FocusView fox={focused} onBack={() => setFocusedId(null)} />
+            <FocusView
+              fox={focused}
+              driveAll={driveAll}
+              fleetCount={instances.length}
+              live={liveId === focused.id}
+              onBack={() => {
+                setLiveId(null)
+                setFocusedId(null)
+              }}
+            />
           ) : (
             <InstanceGrid
               instances={instances}
-              url={url}
-              onFocus={setFocusedId}
+              driveAll={driveAll}
+              onFocus={(id) => {
+                setFocusedId(id)
+                setLiveId(id)
+              }}
               onGotoOne={(id) => window.foxbox.gotoOne(id, url)}
             />
           )}
