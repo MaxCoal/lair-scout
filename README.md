@@ -1,19 +1,49 @@
 # Lair Scout
 
-Windows dashboard for a pile of isolated Chromium sessions. I use it on Secret Lair drops: park a few windows in the queue, drive them together, and get a ping when one gets through.
+Lair Scout is a Windows desktop app for running and monitoring isolated Chromium sessions during [Secret Lair](https://secretlair.wizards.com) drops.
 
-## Run
+Each session is a separate browser profile. The dashboard shows live previews, queue status, and wait times so you can watch several places in line at once.
 
-Needs Node. First time:
+## Requirements
 
-```
+- Windows 10 or later
+- [Node.js](https://nodejs.org/) 20+
+
+## Install
+
+```bash
 npm install
 ```
 
-That also downloads Chromium via Playwright. After that, `start-lair-scout.cmd` or `npm run dev`. Close the terminal to quit.
+This installs dependencies and Playwright’s Chromium build.
 
-`install-start-menu.ps1` puts a shortcut on the Desktop and in the Start menu.
+Start the app with `start-lair-scout.cmd` or:
 
-## Heads-up
+```bash
+npm run dev
+```
 
-This is a Windows project. Each scout is its own browser profile, so RAM climbs fast if you scale up. Name/address autofill and the theme are saved in `settings.json` next to the repo when you run from source.
+To add Start Menu and Desktop shortcuts:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install-start-menu.ps1
+```
+
+Close the terminal that launched the app to shut it down.
+
+## Usage
+
+1. Set the fleet size in the top bar. Two sessions start by default.
+2. Point every scout at the drop with **Send all** (defaults to `https://secretlair.wizards.com/us`).
+3. Use **Cart & queue** when the product page is up. That adds to cart, continues as guest, and enters the Queue-it waiting room.
+4. Watch status chips for lounge / in-queue / admitted. Alerts fire when a queue starts, a session is admitted, or a lounge message (including sold out) appears.
+
+**Drive all** sends clicks, scroll, and keys to every scout. Open a scout to interact with that window only. Checkout name and address can be saved under Settings; they are stored on this machine and filled into guest checkout forms.
+
+## Notes
+
+Lair Scout is Windows-only. Window embedding and resource meters depend on Win32.
+
+Each Chromium instance uses a lot of memory. The top bar shows CPU, GPU, and RAM; scale the fleet down if the machine starts swapping.
+
+Settings (theme, shipping autofill) are written to `settings.json` in the project directory when running from source.
