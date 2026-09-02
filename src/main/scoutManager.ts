@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { join } from 'node:path'
 import type { InstanceSnapshot, RamSnapshot, ShippingProfile } from '@shared/types'
-import { findFoxWindow, hideFoxWindow, moveFoxWindow, placeFoxWindow, setClipChildren, showWindow, stopWin32Host } from './win32'
+import { findScoutWindow, hideScoutWindow, moveScoutWindow, placeScoutWindow, setClipChildren, showWindow, stopWin32Host } from './win32'
 import { readRam } from './memory'
 import { loadSettings, saveSettings } from './settings'
 
@@ -35,7 +35,7 @@ type Pending = {
   reject: (error: Error) => void
 }
 
-export class FirefoxManager {
+export class ScoutManager {
   private window: BrowserWindow | null = null
   private workers = new Map<string, WorkerHandle>()
   private nextId = 1
@@ -52,6 +52,7 @@ export class FirefoxManager {
   private relayoutBusy = false
   private relayoutQueued = false
   private stageRect: StageRect | null = null
+  private strayState: 'pending' | 'cleaning' | 'done' = 'pending'
   private strayDone: Promise<void>
   private markStrayDone: () => void = () => undefined
   private seenNotices = new Set<string>()
@@ -144,7 +145,7 @@ export class FirefoxManager {
         throw new Error('Chromium worker did not start. Is Node.js on PATH?')
       })
     ])
-    const profileDir = join(app.getPath('userData'), 'foxes', `${id}-${Date.now()}`)
+    const profileDir = join(app.getPath('userData'), 'scouts', `${id}-${Date.now()}`)
     this.windows.set(id, { hwnd: 0, pid: 0, profileDir, poppedOut: false, interacting: false })
     this.rebuildSnapshots()
     this.broadcast()
@@ -152,10 +153,10 @@ export class FirefoxManager {
     const state = this.windows.get(id)
     if (state && result?.pid) state.pid = result.pid
     if (state) {
-      state.hwnd = await hideFoxWindow({
+      state.hwnd = await hideScoutWindow({
         pid: state.pid,
         hwnd: state.hwnd,
-        title: `FoxBox-${id}`,
+        title: `LairScout-${id}`,
         owner: this.ownerHwnd()
       })
     }
@@ -240,10 +241,10 @@ export class FirefoxManager {
         other.interacting = false
         other.lastPhys = undefined
         this.fireOn(otherId, 'setPaused', { foxId: otherId, paused: false })
-        await hideFoxWindow({
+        await hideScoutWindow({
           pid: other.pid,
           hwnd: other.hwnd,
-          title: `FoxBox-${otherId}`,
+          title: `LairScout-${otherId}`,
           owner: this.ownerHwnd()
         })
       }
@@ -261,10 +262,10 @@ export class FirefoxManager {
     if (!state) return
     state.interacting = false
     state.lastPhys = undefined
-    state.hwnd = await hideFoxWindow({
+    state.hwnd = await hideScoutWindow({
       pid: state.pid,
       hwnd: state.hwnd,
-      title: `FoxBox-${id}`,
+      title: `LairScout-${id}`,
       owner: this.ownerHwnd()
     })
     this.fireOn(id, 'setPaused', { foxId: id, paused: false })
@@ -279,7 +280,7 @@ export class FirefoxManager {
     if (!state) return
     state.interacting = false
     state.lastPhys = undefined
-    const hwnd = await findFoxWindow({ pid: state.pid, hwnd: state.hwnd, title: `FoxBox-${id}` })
+    const hwnd = await findScoutWindow({ pid: state.pid, hwnd: state.hwnd, title: `LairScout-${id}` })
     if (hwnd) state.hwnd = hwnd
     if (state.hwnd) await showWindow(state.hwnd)
     state.poppedOut = true
@@ -296,10 +297,10 @@ export class FirefoxManager {
     state.interacting = false
     state.poppedOut = false
     state.lastPhys = undefined
-    state.hwnd = await hideFoxWindow({
+    state.hwnd = await hideScoutWindow({
       pid: state.pid,
       hwnd: state.hwnd,
-      title: `FoxBox-${id}`,
+      title: `LairScout-${id}`,
       owner: this.ownerHwnd()
     })
     this.fireOn(id, 'setPaused', { foxId: id, paused: false })
@@ -353,8 +354,8 @@ export class FirefoxManager {
         next.height = state.lastPhys.height
       }
     }
-    const opts = { pid: state.pid, hwnd: state.hwnd, title: `FoxBox-${id}`, owner: this.ownerHwnd() }
-    const hwnd = mode === 'place' ? await placeFoxWindow(opts, next) : await moveFoxWindow(opts, next)
+    const opts = { pid: state.pid, hwnd: state.hwnd, title: `LairScout-${id}`, owner: this.ownerHwnd() }
+    const hwnd = mode === 'place' ? await placeScoutWindow(opts, next) : await moveScoutWindow(opts, next)
     if (hwnd) state.lastPhys = next
     return hwnd
   }
@@ -430,10 +431,10 @@ export class FirefoxManager {
       if (this.shuttingDown) return
       for (const [id, state] of this.windows) {
         if (state.poppedOut || state.interacting) continue
-        void hideFoxWindow({
+        void hideScoutWindow({
           pid: state.pid,
           hwnd: state.hwnd,
-          title: `FoxBox-${id}`,
+          title: `LairScout-${id}`,
           owner: this.ownerHwnd()
         }).then((hwnd) => {
           if (hwnd) state.hwnd = hwnd
@@ -450,15 +451,15 @@ export class FirefoxManager {
     if (existing) return existing
 
     const workerPath =
-      !app.isPackaged && existsSync(join(process.cwd(), 'src/main/foxWorker.cjs'))
-        ? join(process.cwd(), 'src/main/foxWorker.cjs')
-        : join(__dirname, 'foxWorker.cjs')
+      !app.isPackaged && existsSync(join(process.cwd(), 'src/main/scoutWorker.cjs'))
+        ? join(process.cwd(), 'src/main/scoutWorker.cjs')
+        : join(__dirname, 'scoutWorker.cjs')
     const nodePath = resolveNode()
     const env = { ...process.env }
     delete env.PLAYWRIGHT_BROWSERS_PATH
     delete env.ELECTRON_RUN_AS_NODE
-    if (killStray) env.FOXBOX_KILL_STRAY = '1'
-    else delete env.FOXBOX_KILL_STRAY
+    if (killStray) env.LAIRSCOUT_KILL_STRAY = '1'
+    else delete env.LAIRSCOUT_KILL_STRAY
 
     let settled = false
     let markReady: () => void = () => undefined
@@ -479,7 +480,7 @@ export class FirefoxManager {
     this.workers.set(id, handle)
 
     child.stderr.on('data', (chunk) => {
-      console.error(`[fox-worker ${id}]`, String(chunk))
+      console.error(`[stack-worker ${id}]`, String(chunk))
     })
 
     const rl = createInterface({ input: child.stdout })
@@ -497,7 +498,7 @@ export class FirefoxManager {
       }
       if (this.workers.get(id) === handle) this.workers.delete(id)
       if (!this.shuttingDown && this.windows.has(id)) {
-        console.error(`Chromium worker for Fox ${id} exited unexpectedly`, code)
+        console.error(`Chromium worker for Scout ${id} exited unexpectedly`, code)
       }
     })
     return handle
@@ -528,7 +529,7 @@ export class FirefoxManager {
     try {
       message = JSON.parse(line)
     } catch {
-      console.error(`[fox-worker ${foxId}] bad line`, line)
+      console.error(`[stack-worker ${foxId}] bad line`, line)
       return
     }
 
@@ -546,10 +547,10 @@ export class FirefoxManager {
       const state = this.windows.get(String(payload.foxId))
       if (state) {
         state.pid = Number(payload.pid) || 0
-        void hideFoxWindow({
+        void hideScoutWindow({
           pid: state.pid,
           hwnd: state.hwnd,
-          title: `FoxBox-${payload.foxId}`,
+          title: `LairScout-${payload.foxId}`,
           owner: this.ownerHwnd()
         }).then((hwnd) => {
           if (hwnd) state.hwnd = hwnd
@@ -604,13 +605,13 @@ export class FirefoxManager {
 
     if (message.type === 'event' && message.event === 'admitted') {
       const id = String(message.payload)
-      this.emitAlert('instances:admitted', id, `Fox ${id} is through the queue`)
+      this.emitAlert('instances:admitted', id, `Scout ${id} is through the queue`)
       return
     }
 
     if (message.type === 'event' && message.event === 'queuePopped') {
       const id = String(message.payload)
-      this.emitAlert('instances:queuePopped', id, `Fox ${id}: queue started`)
+      this.emitAlert('instances:queuePopped', id, `Scout ${id}: queue started`)
       return
     }
   }
@@ -630,7 +631,7 @@ export class FirefoxManager {
       id,
       url: '',
       host: '',
-      title: `Fox ${id}`,
+      title: `Scout ${id}`,
       status: 'loading',
       statusLabel: 'Starting…',
       interacting: false,
@@ -652,7 +653,7 @@ export class FirefoxManager {
       if (!win.isDestroyed()) win.webContents.send(channel, id)
     }
     if (!this.muted && Notification.isSupported()) {
-      new Notification({ title: 'FoxBox', body }).show()
+      new Notification({ title: 'Lair Scout', body }).show()
     }
   }
 
@@ -667,7 +668,7 @@ export class FirefoxManager {
       if (!win.isDestroyed()) win.webContents.send(channel, payload)
     }
     if (!this.muted && Notification.isSupported()) {
-      new Notification({ title: `FoxBox · ${title}`, body: body.slice(0, 240) }).show()
+      new Notification({ title: `Lair Scout · ${title}`, body: body.slice(0, 240) }).show()
     }
   }
 
@@ -691,7 +692,7 @@ export class FirefoxManager {
 
   private callOn(foxId: string, cmd: string, payload: Record<string, unknown>, timeoutMs = 60000): Promise<unknown> {
     const handle = this.workers.get(foxId)
-    if (!handle) return Promise.reject(new Error(`No worker for Fox ${foxId}`))
+    if (!handle) return Promise.reject(new Error(`No worker for Scout ${foxId}`))
     const requestId = this.nextRequest++
     return new Promise((resolve, reject) => {
       this.pending.set(requestId, { foxId, resolve, reject })
@@ -717,7 +718,7 @@ export class FirefoxManager {
   }
 }
 
-export const firefoxManager = new FirefoxManager()
+export const scoutManager = new ScoutManager()
 
 function resolveNode(): string {
   const fromNpm = process.env.npm_node_execpath

@@ -1,7 +1,7 @@
 {
-  "name": "foxbox",
+  "name": "lair-scout",
   "version": "0.1.0",
-  "description": "Dashboard for isolated Chromium sessions and queue monitoring",
+  "description": "Dashboard for isolated Chromium sessions and Secret Lair queue monitoring",
   "main": "./out/main/index.js",
   "author": "Max",
   "scripts": {

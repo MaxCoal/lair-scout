@@ -9,7 +9,7 @@ const sharedAlias = {
 }
 
 function copyRuntimeFiles(): Plugin {
-  const files = ['win32.ps1', 'win32-host.ps1', 'foxWorker.cjs']
+  const files = ['win32.ps1', 'win32-host.ps1', 'scoutWorker.cjs']
   const copy = (): void => {
     mkdirSync('out/main', { recursive: true })
     for (const name of files) cpSync(`src/main/${name}`, `out/main/${name}`)

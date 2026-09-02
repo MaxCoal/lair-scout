@@ -117,13 +117,13 @@ export async function controlWindow(opts: Win32Opts): Promise<number> {
   }
 }
 
-export async function hideFoxWindow(
+export async function hideScoutWindow(
   opts: { pid?: number; hwnd?: number; title?: string; owner?: number }
 ): Promise<number> {
   return controlWindow({ action: 'hide', taskbar: false, topmost: false, ...opts })
 }
 
-export async function findFoxWindow(opts: { pid?: number; hwnd?: number; title?: string }): Promise<number> {
+export async function findScoutWindow(opts: { pid?: number; hwnd?: number; title?: string }): Promise<number> {
   return controlWindow({ action: 'find', ...opts })
 }
 
@@ -131,14 +131,14 @@ export async function showWindow(hwnd: number): Promise<number> {
   return controlWindow({ action: 'show', hwnd, taskbar: true, topmost: false, owner: 0 })
 }
 
-export async function placeFoxWindow(
+export async function placeScoutWindow(
   opts: { pid?: number; hwnd?: number; title?: string; owner?: number },
   rect: { x: number; y: number; width: number; height: number }
 ): Promise<number> {
   return controlWindow({ action: 'place', taskbar: false, topmost: false, ...opts, ...rect })
 }
 
-export async function moveFoxWindow(
+export async function moveScoutWindow(
   opts: { pid?: number; hwnd?: number; title?: string; owner?: number },
   rect: { x: number; y: number; width: number; height: number }
 ): Promise<number> {

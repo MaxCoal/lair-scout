@@ -63,13 +63,13 @@ export type RamSnapshot = {
   usedBytes: number
   totalBytes: number
   freeBytes: number
-  foxboxBytes: number
+  scoutBytes: number
   percent: number
   usedLabel: string
   totalLabel: string
-  foxboxLabel: string
+  scoutLabel: string
   cpuPercent: number
-  cpuFoxboxPercent: number
+  cpuScoutPercent: number
   gpuPercent: number | null
   gpuName: string
 }
@@ -79,7 +79,7 @@ export type ShippingProfile = {
   address: string
 }
 
-export type FoxboxAPI = {
+export type LairScoutAPI = {
   spawn: () => Promise<void>
   scaleTo: (count: number) => Promise<void>
   kill: (id: string) => Promise<void>

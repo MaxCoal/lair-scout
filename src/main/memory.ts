@@ -15,8 +15,8 @@ const execFileAsync = promisify(execFile)
 type CpuTimes = { user: number; nice: number; sys: number; idle: number; irq: number }
 
 let lastCpu: CpuTimes[] = readCpuTimes()
-let lastFoxCpuAt = 0
-let lastFoxCpuSeconds = 0
+let lastScoutCpuAt = 0
+let lastScoutCpuSeconds = 0
 let gpuCache: { percent: number; name: string } | null = null
 let gpuBusy = false
 
@@ -51,40 +51,40 @@ export async function readRam(rootPids: number[]): Promise<RamSnapshot> {
   const freeBytes = freemem()
   const usedBytes = Math.max(0, totalBytes - freeBytes)
   const percent = totalBytes > 0 ? Math.round((usedBytes / totalBytes) * 100) : 0
-  const proc = await readFoxboxProc(rootPids)
+  const proc = await readScoutProc(rootPids)
   const now = Date.now()
-  let cpuFoxboxPercent = 0
-  if (lastFoxCpuAt && proc.cpuSeconds >= lastFoxCpuSeconds) {
-    const dt = (now - lastFoxCpuAt) / 1000
+  let cpuScoutPercent = 0
+  if (lastScoutCpuAt && proc.cpuSeconds >= lastScoutCpuSeconds) {
+    const dt = (now - lastScoutCpuAt) / 1000
     const cores = Math.max(1, cpus().length)
     if (dt > 0.2) {
-      cpuFoxboxPercent = Math.max(
+      cpuScoutPercent = Math.max(
         0,
-        Math.min(100, Math.round(((proc.cpuSeconds - lastFoxCpuSeconds) / dt / cores) * 100))
+        Math.min(100, Math.round(((proc.cpuSeconds - lastScoutCpuSeconds) / dt / cores) * 100))
       )
     }
   }
-  lastFoxCpuAt = now
-  lastFoxCpuSeconds = proc.cpuSeconds
+  lastScoutCpuAt = now
+  lastScoutCpuSeconds = proc.cpuSeconds
   void refreshGpu()
 
   return {
     usedBytes,
     totalBytes,
     freeBytes,
-    foxboxBytes: proc.bytes,
+    scoutBytes: proc.bytes,
     percent,
     usedLabel: gb(usedBytes),
     totalLabel: gb(totalBytes),
-    foxboxLabel: gb(proc.bytes),
+    scoutLabel: gb(proc.bytes),
     cpuPercent,
-    cpuFoxboxPercent,
+    cpuScoutPercent,
     gpuPercent: gpuCache?.percent ?? null,
     gpuName: gpuCache?.name || ''
   }
 }
 
-async function readFoxboxProc(rootPids: number[]): Promise<{ bytes: number; cpuSeconds: number }> {
+async function readScoutProc(rootPids: number[]): Promise<{ bytes: number; cpuSeconds: number }> {
   const pids = [...new Set(rootPids.filter((pid) => pid > 0))]
   if (!pids.length) return { bytes: 0, cpuSeconds: 0 }
   const list = pids.join(',')

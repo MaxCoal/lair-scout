@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import type { RamSnapshot } from '@shared/types'
-import { foxSortLabel, type FoxSort } from '../sortFoxes'
+import { instanceSortLabel, type InstanceSort } from '../sortInstances'
 
 function tone(percent: number): string {
   if (percent >= 90) return 'critical'
@@ -23,8 +23,8 @@ type Props = {
   onToggleDriveAll: () => void
   onOpenDriveWindow: () => void
   onOpenSettings: () => void
-  foxSort: FoxSort
-  onCycleFoxSort: () => void
+  instanceSort: InstanceSort
+  onCycleInstanceSort: () => void
 }
 
 export default function FleetBar({
@@ -42,8 +42,8 @@ export default function FleetBar({
   onToggleDriveAll,
   onOpenDriveWindow,
   onOpenSettings,
-  foxSort,
-  onCycleFoxSort
+  instanceSort,
+  onCycleInstanceSort
 }: Props) {
   const [draft, setDraft] = useState(String(count))
   const editing = useRef(false)
@@ -67,12 +67,14 @@ export default function FleetBar({
       <div className="top-row">
         <div className="brand">
           <svg className="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
-            <path fill="#f97316" d="M6 8l6-4 4 5 4-5 6 4-2 8c0 7-4 12-8 12s-8-5-8-12L6 8z" />
-            <circle cx="13" cy="14" r="1.4" fill="#0b0c0f" />
-            <circle cx="19" cy="14" r="1.4" fill="#0b0c0f" />
+            <path
+              fill="#c9a36a"
+              d="M16 3.5l3.2 8.2 8.8.6-6.8 5.4 2.2 8.5L16 21.6 8.6 26.2l2.2-8.5-6.8-5.4 8.8-.6z"
+            />
+            <circle cx="16" cy="16" r="3.2" fill="#0b0c0f" />
           </svg>
           <div className="brand-name">
-            Fox<span>Box</span>
+            Lair<span>Scout</span>
           </div>
         </div>
         <form className="nav-form" onSubmit={onSendAll}>
@@ -127,11 +129,11 @@ export default function FleetBar({
           <div
             className={`ram-meter combined ${tone(Math.max(ram.cpuPercent, ram.gpuPercent ?? 0, ram.percent))}`}
             title={[
-              `CPU ${ram.cpuPercent}% (FoxBox ~${ram.cpuFoxboxPercent}% of all cores)`,
+              `CPU ${ram.cpuPercent}% (Lair Scout ~${ram.cpuScoutPercent}% of all cores)`,
               ram.gpuPercent == null
                 ? 'GPU hardware acceleration on'
                 : `GPU ${ram.gpuPercent}%${ram.gpuName ? ` · ${ram.gpuName}` : ''}`,
-              `RAM ${ram.usedLabel} / ${ram.totalLabel} · FoxBox ${ram.foxboxLabel}`
+              `RAM ${ram.usedLabel} / ${ram.totalLabel} · Lair Scout ${ram.scoutLabel}`
             ].join('\n')}
           >
             <div
@@ -152,12 +154,12 @@ export default function FleetBar({
             Drive all
           </button>
           <button
-            className={`btn ghost ${foxSort !== 'id' ? 'active' : ''}`}
+            className={`btn ghost ${instanceSort !== 'id' ? 'active' : ''}`}
             type="button"
-            title="Sort foxes by remaining queue time"
-            onClick={onCycleFoxSort}
+            title="Sort by remaining queue time"
+            onClick={onCycleInstanceSort}
           >
-            {foxSortLabel(foxSort)}
+            {instanceSortLabel(instanceSort)}
           </button>
           {driveAll ? (
             <button className="btn" type="button" onClick={onOpenDriveWindow}>

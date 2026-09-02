@@ -15,7 +15,7 @@ export default function SettingsModal({ open, onClose }: Props) {
   useEffect(() => {
     if (!open) return
     setSaved(false)
-    void window.foxbox.getSettings().then((profile) => {
+    void window.lairscout.getSettings().then((profile) => {
       setName(profile.name)
       setAddress(profile.address)
     })
@@ -26,7 +26,7 @@ export default function SettingsModal({ open, onClose }: Props) {
   const onSave = (event: FormEvent): void => {
     event.preventDefault()
     setSaving(true)
-    void window.foxbox
+    void window.lairscout
       .saveSettings({ name, address })
       .then((profile) => {
         setName(profile.name)
@@ -50,7 +50,7 @@ export default function SettingsModal({ open, onClose }: Props) {
           </button>
         </div>
         <p className="hint">
-          Saved on this machine only. Name and address are filled into checkout forms on every fox.
+          Saved on this machine only. Name and address are filled into checkout forms on every scout.
         </p>
         <label className="field">
           <span>Name</span>

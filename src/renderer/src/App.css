@@ -8,8 +8,8 @@
   --line-strong: rgba(255, 255, 255, 0.12);
   --text: #eef0f4;
   --muted: #8b919c;
-  --fox: #f97316;
-  --fox-dim: rgba(249, 115, 22, 0.16);
+  --accent: #c9a36a;
+  --accent-dim: rgba(201, 163, 106, 0.16);
   --idle: #6b7280;
   --loading: #fbbf24;
   --queue: #60a5fa;
@@ -32,7 +32,7 @@ body,
 
 body {
   font-family: Outfit, 'Segoe UI', sans-serif;
-  background: radial-gradient(1200px 600px at 10% -10%, rgba(249, 115, 22, 0.08), transparent 50%),
+  background: radial-gradient(1200px 600px at 10% -10%, rgba(201, 163, 106, 0.08), transparent 50%),
     var(--bg);
   color: var(--text);
   overflow: hidden;
@@ -89,7 +89,7 @@ input {
 }
 
 .brand-name span {
-  color: var(--fox);
+  color: var(--accent);
 }
 
 .nav-form {
@@ -112,8 +112,8 @@ input {
 }
 
 .nav-form input:focus {
-  border-color: rgba(249, 115, 22, 0.7);
-  box-shadow: 0 0 0 3px var(--fox-dim);
+  border-color: rgba(201, 163, 106, 0.7);
+  box-shadow: 0 0 0 3px var(--accent-dim);
 }
 
 .top-actions {
@@ -145,8 +145,8 @@ input {
 }
 
 .count-input:focus {
-  border-color: rgba(249, 115, 22, 0.7);
-  box-shadow: 0 0 0 3px var(--fox-dim);
+  border-color: rgba(201, 163, 106, 0.7);
+  box-shadow: 0 0 0 3px var(--accent-dim);
 }
 
 .ram-meter {
@@ -212,9 +212,9 @@ input {
 }
 
 .btn.primary {
-  background: linear-gradient(180deg, #fb923c, #ea580c);
+  background: linear-gradient(180deg, #e4c48a, #b8893e);
   border-color: transparent;
-  color: #1a0b00;
+  color: #1a1408;
   font-weight: 600;
 }
 
@@ -232,9 +232,9 @@ input {
 }
 
 .btn.ghost.active {
-  background: var(--fox-dim);
-  border-color: rgba(249, 115, 22, 0.4);
-  color: #fdba74;
+  background: var(--accent-dim);
+  border-color: rgba(201, 163, 106, 0.4);
+  color: #e4c48a;
 }
 
 .btn.ghost.alerts-on {
@@ -296,7 +296,7 @@ input {
 
 .fox-row.active,
 .fox-row:hover {
-  border-color: rgba(249, 115, 22, 0.35);
+  border-color: rgba(201, 163, 106, 0.35);
 }
 
 .fox-row-title {
@@ -340,9 +340,9 @@ input {
   margin: 0 0 12px;
   padding: 10px 12px;
   border-radius: 10px;
-  background: var(--fox-dim);
-  border: 1px solid rgba(249, 115, 22, 0.25);
-  color: #fdba74;
+  background: var(--accent-dim);
+  border: 1px solid rgba(201, 163, 106, 0.25);
+  color: #e4c48a;
   font-size: 13px;
 }
 
@@ -637,6 +637,6 @@ input {
 
 .field input:focus,
 .field textarea:focus {
-  border-color: rgba(249, 115, 22, 0.7);
-  box-shadow: 0 0 0 3px var(--fox-dim);
+  border-color: rgba(201, 163, 106, 0.7);
+  box-shadow: 0 0 0 3px var(--accent-dim);
 }

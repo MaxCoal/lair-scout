@@ -20,21 +20,21 @@ export default function InstanceTile({ fox, driveAll, onFocus, onGotoOne, onRest
       {fox.screenshot ? (
         <img
           src={fox.screenshot}
-          alt={`Fox ${fox.id}`}
+          alt={`Scout ${fox.id}`}
           onMouseMove={(event) => {
             if (!driveAll) return
             const now = Date.now()
             if (now - lastMove.current < 32) return
             lastMove.current = now
             const point = eventCoords(event)
-            if (point) void window.foxbox.move({ id, ...point })
+            if (point) void window.lairscout.move({ id, ...point })
           }}
           onMouseDown={(event) => {
             if (!driveAll) return
             const point = eventCoords(event)
             if (!point) return
             event.preventDefault()
-            void window.foxbox.click({
+            void window.lairscout.click({
               id,
               ...point,
               button: mouseButton(event),
@@ -45,7 +45,7 @@ export default function InstanceTile({ fox, driveAll, onFocus, onGotoOne, onRest
             if (!driveAll) return
             event.preventDefault()
             event.stopPropagation()
-            void window.foxbox.scroll({ id, dx: event.deltaX, dy: event.deltaY })
+            void window.lairscout.scroll({ id, dx: event.deltaX, dy: event.deltaY })
           }}
           onContextMenu={(event) => event.preventDefault()}
           onDoubleClick={() => {
@@ -62,7 +62,7 @@ export default function InstanceTile({ fox, driveAll, onFocus, onGotoOne, onRest
       )}
       <div className="tile-overlay">
         <div>
-          <div style={{ fontWeight: 600 }}>Fox {fox.id}</div>
+          <div style={{ fontWeight: 600 }}>Scout {fox.id}</div>
           <div className="mono">{statusLine(fox)}</div>
         </div>
         <div className="tile-actions">

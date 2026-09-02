@@ -46,7 +46,7 @@ export default function FocusView({ fox, driveAll, fleetCount, live, onBack, onR
       last.y = next.y
       last.width = next.width
       last.height = next.height
-      void window.foxbox.interact(fox.id, next)
+      void window.lairscout.interact(fox.id, next)
     }
     const schedule = (): void => {
       window.clearTimeout(timer)
@@ -60,7 +60,7 @@ export default function FocusView({ fox, driveAll, fleetCount, live, onBack, onR
       window.clearTimeout(timer)
       observer.disconnect()
       window.removeEventListener('resize', schedule)
-      void window.foxbox.stopInteract(fox.id)
+      void window.lairscout.stopInteract(fox.id)
     }
   }, [fox.id, live])
 
@@ -74,7 +74,7 @@ export default function FocusView({ fox, driveAll, fleetCount, live, onBack, onR
       if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return
       if (event.type === 'keydown' && event.repeat) return
       event.preventDefault()
-      void window.foxbox.key({
+      void window.lairscout.key({
         id: fox.id,
         key: event.key,
         type: event.type === 'keyup' ? 'up' : 'down'
@@ -95,7 +95,7 @@ export default function FocusView({ fox, driveAll, fleetCount, live, onBack, onR
       <div className="focus-bar">
         <div>
           <strong>
-            {live ? `Live · Fox ${fox.id}` : driveAll ? `All foxes · showing Fox ${fox.id}` : `Fox ${fox.id}`}
+            {live ? `Live · Scout ${fox.id}` : driveAll ? `All scouts · showing Scout ${fox.id}` : `Scout ${fox.id}`}
           </strong>
           <div className="mono">
             {live
@@ -108,15 +108,15 @@ export default function FocusView({ fox, driveAll, fleetCount, live, onBack, onR
         <div className="top-actions">
           <StatusChip status={fox.status} />
           {fox.poppedOut ? (
-            <button className="btn" type="button" onClick={() => window.foxbox.dock(fox.id)}>
+            <button className="btn" type="button" onClick={() => window.lairscout.dock(fox.id)}>
               Dock
             </button>
           ) : (
-            <button className="btn" type="button" onClick={() => window.foxbox.popOut(fox.id)}>
+            <button className="btn" type="button" onClick={() => window.lairscout.popOut(fox.id)}>
               Pop out
             </button>
           )}
-          <button className="btn danger" type="button" onClick={() => window.foxbox.reload(fox.id)}>
+          <button className="btn danger" type="button" onClick={() => window.lairscout.reload(fox.id)}>
             Reload (may drop queue)
           </button>
           <button
@@ -143,7 +143,7 @@ export default function FocusView({ fox, driveAll, fleetCount, live, onBack, onR
             return
           }
           event.preventDefault()
-          void window.foxbox.scroll({ id, dx: event.deltaX, dy: event.deltaY })
+          void window.lairscout.scroll({ id, dx: event.deltaX, dy: event.deltaY })
         }}
         onContextMenu={(event) => event.preventDefault()}
       >
@@ -152,18 +152,18 @@ export default function FocusView({ fox, driveAll, fleetCount, live, onBack, onR
         ) : fox.screenshot ? (
           <img
             src={fox.screenshot}
-            alt={driveAll ? 'Herd live view' : `Fox ${fox.id} live view`}
+            alt={driveAll ? 'Fleet live view' : `Scout ${fox.id} live view`}
             onMouseMove={(event) => {
               const now = Date.now()
               if (now - lastMove.current < 32) return
               lastMove.current = now
               const point = eventCoords(event)
-              if (point) void window.foxbox.move({ id, ...point })
+              if (point) void window.lairscout.move({ id, ...point })
             }}
             onMouseDown={(event) => {
               const point = eventCoords(event)
               if (!point) return
-              void window.foxbox.click({
+              void window.lairscout.click({
                 id,
                 ...point,
                 button: mouseButton(event),

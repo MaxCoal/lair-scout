@@ -648,7 +648,7 @@ async function spawnFox(foxId, profileDir) {
         '--enable-gpu-rasterization',
         '--enable-zero-copy',
         '--use-angle=d3d11',
-        '--app-user-model-id=com.foxbox.app'
+        '--app-user-model-id=com.lairscout.app'
       ]
     })
     const pid = getBrowserPid(context)
@@ -665,7 +665,7 @@ async function spawnFox(foxId, profileDir) {
       wasInQueue: false,
       url: page.url(),
       host: '',
-      title: `Fox ${foxId}`,
+      title: `Scout ${foxId}`,
       admittedFlashUntil: 0,
       navigating: false
     }
@@ -682,7 +682,7 @@ async function spawnFox(foxId, profileDir) {
     await applyShippingToFox(fox)
     emitUpdate()
     await page.goto(
-      `data:text/html,<html><head><title>FoxBox-${foxId}</title></head><body style="margin:0;background:#0c0d10;color:#e8eaed;font-family:Segoe UI,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh"><div style="text-align:center"><div style="letter-spacing:.2em;text-transform:uppercase;color:#f97316">FoxBox</div><h1>Fox ${foxId}</h1><p style="color:#8b919a">Ready. Use Send all to navigate.</p></div></body></html>`,
+      `data:text/html,<html><head><title>LairScout-${foxId}</title></head><body style="margin:0;background:#0c0d10;color:#e8eaed;font-family:Segoe UI,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh"><div style="text-align:center"><div style="letter-spacing:.2em;text-transform:uppercase;color:#c9a36a">Lair Scout</div><h1>Scout ${foxId}</h1><p style="color:#8b919a">Ready. Use Send all to navigate.</p></div></body></html>`,
       { waitUntil: 'domcontentloaded' }
     )
     fox.url = page.url()
@@ -967,7 +967,7 @@ async function runRushCheckout(fox, page) {
 
 async function rushCheckoutFox(fox) {
   const page = pageOf(fox)
-  if (!page) throw new Error(`Fox ${fox.id} has no page`)
+  if (!page) throw new Error(`Scout ${fox.id} has no page`)
   if (isOnQueue(page.url())) {
     fox.navigating = false
     return
@@ -1108,6 +1108,6 @@ rl.on('line', (line) => {
   })
 })
 
-if (process.env.FOXBOX_KILL_STRAY === '1') killStrayPlaywrightChromium()
+if (process.env.LAIRSCOUT_KILL_STRAY === '1') killStrayPlaywrightChromium()
 scheduleTick()
 send({ type: 'event', event: 'ready', payload: { executable: chromium.executablePath() } })

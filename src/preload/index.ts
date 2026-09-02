@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
   ClickPayload,
-  FoxboxAPI,
+  LairScoutAPI,
   InstanceSnapshot,
   KeyPayload,
   MovePayload,
@@ -11,7 +11,7 @@ import type {
   ShippingProfile
 } from '@shared/types'
 
-const api: FoxboxAPI = {
+const api: LairScoutAPI = {
   spawn: () => ipcRenderer.invoke('instances:spawn'),
   scaleTo: (count) => ipcRenderer.invoke('instances:scaleTo', count),
   kill: (id) => ipcRenderer.invoke('instances:kill', id),
@@ -82,4 +82,4 @@ const api: FoxboxAPI = {
   }
 }
 
-contextBridge.exposeInMainWorld('foxbox', api)
+contextBridge.exposeInMainWorld('lairscout', api)

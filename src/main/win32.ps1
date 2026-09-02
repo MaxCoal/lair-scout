@@ -18,13 +18,13 @@ param(
   [string]$Action = 'find'
 )
 
-if (-not ('FoxBoxNative' -as [type])) {
+if (-not ('LairScoutNative' -as [type])) {
   Add-Type -TypeDefinition @"
 using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Runtime.InteropServices;
-public static class FoxBoxNative {
+public static class LairScoutNative {
   public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
   [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
@@ -90,10 +90,10 @@ if ($Handle -ne 0) {
 } elseif ($Profile -ne "") {
   $pids = @(Get-ProfilePids $Profile)
   if ($pids.Count -gt 0) {
-    $hwnds = @([FoxBoxNative]::FindByPids($pids))
+    $hwnds = @([LairScoutNative]::FindByPids($pids))
   }
 } elseif ($Title -ne "") {
-  $found = [FoxBoxNative]::FindByTitle($Title)
+  $found = [LairScoutNative]::FindByTitle($Title)
   if ($found -ne 0) { $hwnds = @($found) }
 }
 
@@ -106,19 +106,19 @@ $HWND_TOP = [IntPtr]::Zero
 foreach ($raw in $hwnds) {
   $hwnd = [IntPtr]$raw
   if ($hwnd -eq [IntPtr]::Zero) { continue }
-  if (-not [FoxBoxNative]::IsWindow($hwnd)) { continue }
+  if (-not [LairScoutNative]::IsWindow($hwnd)) { continue }
   if ($Action -eq "hide") {
     # Keep the window shown off-screen so Playwright can still click it.
-    [void][FoxBoxNative]::ShowWindow($hwnd, 8)
-    [void][FoxBoxNative]::SetWindowPos($hwnd, [IntPtr]::Zero, -32000, -32000, 1280, 720, ($SWP_NOZORDER -bor $SWP_NOACTIVATE -bor $SWP_SHOWWINDOW))
+    [void][LairScoutNative]::ShowWindow($hwnd, 8)
+    [void][LairScoutNative]::SetWindowPos($hwnd, [IntPtr]::Zero, -32000, -32000, 1280, 720, ($SWP_NOZORDER -bor $SWP_NOACTIVATE -bor $SWP_SHOWWINDOW))
   } elseif ($Action -eq "show") {
-    [void][FoxBoxNative]::SetWindowPos($hwnd, $HWND_TOP, 80, 80, 1280, 720, $SWP_SHOWWINDOW)
-    [void][FoxBoxNative]::ShowWindow($hwnd, 9)
-    [void][FoxBoxNative]::SetForegroundWindow($hwnd)
+    [void][LairScoutNative]::SetWindowPos($hwnd, $HWND_TOP, 80, 80, 1280, 720, $SWP_SHOWWINDOW)
+    [void][LairScoutNative]::ShowWindow($hwnd, 9)
+    [void][LairScoutNative]::SetForegroundWindow($hwnd)
   } elseif ($Action -eq "place") {
-    [void][FoxBoxNative]::SetWindowPos($hwnd, $HWND_TOP, $X, $Y, $Width, $Height, $SWP_SHOWWINDOW)
-    [void][FoxBoxNative]::ShowWindow($hwnd, 9)
-    [void][FoxBoxNative]::SetForegroundWindow($hwnd)
+    [void][LairScoutNative]::SetWindowPos($hwnd, $HWND_TOP, $X, $Y, $Width, $Height, $SWP_SHOWWINDOW)
+    [void][LairScoutNative]::ShowWindow($hwnd, 9)
+    [void][LairScoutNative]::SetForegroundWindow($hwnd)
   }
   if ($kept -eq 0) { $kept = $hwnd.ToInt64() }
 }

@@ -29,7 +29,7 @@ public struct FoxPoint {
   public int Y;
 }
 
-public static class FoxBoxNative {
+public static class LairScoutNative {
   public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
   [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
@@ -53,7 +53,7 @@ public static class FoxBoxNative {
 
   static IFoxTaskbarList taskbar;
 
-  static FoxBoxNative() {
+  static LairScoutNative() {
     try {
       Type t = Type.GetTypeFromCLSID(new Guid("56FDF344-FD6D-11d0-958A-006097C9A090"));
       taskbar = (IFoxTaskbarList)Activator.CreateInstance(t);
@@ -84,7 +84,7 @@ public static class FoxBoxNative {
       int score = 0;
       if (c.IndexOf("Chrome_WidgetWin_1", StringComparison.OrdinalIgnoreCase) >= 0) score += 120;
       if (c.IndexOf("MozillaWindowClass", StringComparison.OrdinalIgnoreCase) >= 0) score += 120;
-      if (title.IndexOf("FoxBox-", StringComparison.OrdinalIgnoreCase) >= 0) score += 40;
+      if (title.IndexOf("LairScout-", StringComparison.OrdinalIgnoreCase) >= 0) score += 40;
       if (w >= 400 && h >= 300) score += 25;
       if (IsWindowVisible(hWnd)) score += 8;
       if (score > bestScore) {
@@ -240,7 +240,7 @@ public static class FoxBoxNative {
 }
 "@
 
-[void][FoxBoxNative]::MakeDpiAware()
+[void][LairScoutNative]::MakeDpiAware()
 
 $SWP_NOZORDER = 0x0004
 $SWP_NOACTIVATE = 0x0010
@@ -266,14 +266,14 @@ function Get-RelatedPids([uint32]$root) {
 function Get-Hwnd($cmd) {
   if ($cmd.handle -and ([Int64]$cmd.handle -ne 0)) {
     $hwnd = [IntPtr]([Int64]$cmd.handle)
-    if ([FoxBoxNative]::IsWindow($hwnd)) { return [Int64]$cmd.handle }
+    if ([LairScoutNative]::IsWindow($hwnd)) { return [Int64]$cmd.handle }
   }
   if ($cmd.pid -and ([uint32]$cmd.pid -ne 0)) {
-    $found = [FoxBoxNative]::FindBestByPids((Get-RelatedPids ([uint32]$cmd.pid)))
+    $found = [LairScoutNative]::FindBestByPids((Get-RelatedPids ([uint32]$cmd.pid)))
     if ($found -ne 0) { return $found }
   }
   if ($cmd.title) {
-    $found = [FoxBoxNative]::FindByTitle([string]$cmd.title)
+    $found = [LairScoutNative]::FindByTitle([string]$cmd.title)
     if ($found -ne 0) { return $found }
   }
   return 0
@@ -283,7 +283,7 @@ function Invoke-FoxAction($cmd) {
   $raw = Get-Hwnd $cmd
   if ($raw -eq 0) { return 0 }
   $hwnd = [IntPtr]$raw
-  if (-not [FoxBoxNative]::IsWindow($hwnd)) { return 0 }
+  if (-not [LairScoutNative]::IsWindow($hwnd)) { return 0 }
 
   $action = [string]$cmd.action
   $x = [int]($cmd.x)
@@ -303,24 +303,24 @@ function Invoke-FoxAction($cmd) {
     if ($action -eq "find") {
       return $raw
     } elseif ($action -eq "hide") {
-    [FoxBoxNative]::Detach($hwnd, [IntPtr]$owner)
-    [FoxBoxNative]::SetTaskbar($hwnd, $false)
-    [FoxBoxNative]::SetFrame($hwnd, $true)
-    [void][FoxBoxNative]::ShowWindow($hwnd, 8)
-    [void][FoxBoxNative]::SetWindowPos($hwnd, $HWND_NOTOPMOST, -32000, -32000, 1280, 720, ($SWP_NOACTIVATE -bor $SWP_SHOWWINDOW -bor $SWP_FRAMECHANGED))
+    [LairScoutNative]::Detach($hwnd, [IntPtr]$owner)
+    [LairScoutNative]::SetTaskbar($hwnd, $false)
+    [LairScoutNative]::SetFrame($hwnd, $true)
+    [void][LairScoutNative]::ShowWindow($hwnd, 8)
+    [void][LairScoutNative]::SetWindowPos($hwnd, $HWND_NOTOPMOST, -32000, -32000, 1280, 720, ($SWP_NOACTIVATE -bor $SWP_SHOWWINDOW -bor $SWP_FRAMECHANGED))
   } elseif ($action -eq "show") {
-    [FoxBoxNative]::Detach($hwnd, [IntPtr]::Zero)
-    [FoxBoxNative]::SetFrame($hwnd, $true)
-    [FoxBoxNative]::SetTaskbar($hwnd, $true)
-    [void][FoxBoxNative]::SetWindowPos($hwnd, $HWND_NOTOPMOST, 80, 80, 1280, 720, ($SWP_SHOWWINDOW -bor $SWP_FRAMECHANGED))
-    [void][FoxBoxNative]::ShowWindow($hwnd, 8)
-    [void][FoxBoxNative]::SetForegroundWindow($hwnd)
+    [LairScoutNative]::Detach($hwnd, [IntPtr]::Zero)
+    [LairScoutNative]::SetFrame($hwnd, $true)
+    [LairScoutNative]::SetTaskbar($hwnd, $true)
+    [void][LairScoutNative]::SetWindowPos($hwnd, $HWND_NOTOPMOST, 80, 80, 1280, 720, ($SWP_SHOWWINDOW -bor $SWP_FRAMECHANGED))
+    [void][LairScoutNative]::ShowWindow($hwnd, 8)
+    [void][LairScoutNative]::SetForegroundWindow($hwnd)
   } elseif ($action -eq "place") {
-    [FoxBoxNative]::EmbedAt($hwnd, [IntPtr]$owner, $x, $y, $w, $h)
+    [LairScoutNative]::EmbedAt($hwnd, [IntPtr]$owner, $x, $y, $w, $h)
   } elseif ($action -eq "move") {
-    [FoxBoxNative]::MoveEmbedded($hwnd, [IntPtr]$owner, $x, $y, $w, $h)
+    [LairScoutNative]::MoveEmbedded($hwnd, [IntPtr]$owner, $x, $y, $w, $h)
   } elseif ($action -eq "clip") {
-    [FoxBoxNative]::SetClipChildren($hwnd, [bool]$cmd.clip)
+    [LairScoutNative]::SetClipChildren($hwnd, [bool]$cmd.clip)
   }
 
   return $raw

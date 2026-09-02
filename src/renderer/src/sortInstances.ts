@@ -1,33 +1,33 @@
 import type { InstanceSnapshot } from '@shared/types'
 
-export type FoxSort = 'id' | 'wait-asc' | 'wait-desc'
+export type InstanceSort = 'id' | 'wait-asc' | 'wait-desc'
 
-export function nextFoxSort(current: FoxSort): FoxSort {
+export function nextInstanceSort(current: InstanceSort): InstanceSort {
   if (current === 'id') return 'wait-asc'
   if (current === 'wait-asc') return 'wait-desc'
   return 'id'
 }
 
-export function foxSortLabel(sort: FoxSort): string {
+export function instanceSortLabel(sort: InstanceSort): string {
   if (sort === 'wait-asc') return 'Wait ↑'
   if (sort === 'wait-desc') return 'Wait ↓'
   return 'Sort'
 }
 
-function idRank(fox: InstanceSnapshot): number {
-  const n = Number.parseInt(fox.id, 10)
+function idRank(instance: InstanceSnapshot): number {
+  const n = Number.parseInt(instance.id, 10)
   return Number.isFinite(n) ? n : 0
 }
 
-function statusBucket(fox: InstanceSnapshot): number {
-  if (fox.status === 'admitted') return 0
-  if (fox.status === 'waiting_for_queue') return 1
-  if (fox.status === 'in_queue') return 2
+function statusBucket(instance: InstanceSnapshot): number {
+  if (instance.status === 'admitted') return 0
+  if (instance.status === 'waiting_for_queue') return 1
+  if (instance.status === 'in_queue') return 2
   return 3
 }
 
-export function waitRank(fox: InstanceSnapshot): number {
-  const text = String(fox.waitTime || '')
+export function waitRank(instance: InstanceSnapshot): number {
+  const text = String(instance.waitTime || '')
     .replace(/\s+/g, ' ')
     .trim()
     .toLowerCase()
@@ -41,7 +41,7 @@ export function waitRank(fox: InstanceSnapshot): number {
   return 10_000
 }
 
-export function sortFoxes(instances: InstanceSnapshot[], sort: FoxSort): InstanceSnapshot[] {
+export function sortInstances(instances: InstanceSnapshot[], sort: InstanceSort): InstanceSnapshot[] {
   if (sort === 'id') return instances
   const dir = sort === 'wait-asc' ? 1 : -1
   return [...instances].sort((a, b) => {

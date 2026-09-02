@@ -7,7 +7,7 @@ import FocusView from './components/FocusView'
 import DrivePad from './components/DrivePad'
 import SettingsModal from './components/SettingsModal'
 import QueueNoticeBox from './components/QueueNoticeBox'
-import { nextFoxSort, sortFoxes, type FoxSort } from './sortFoxes'
+import { nextInstanceSort, sortInstances, type InstanceSort } from './sortInstances'
 
 const DEFAULT_URL = 'https://secretlair.wizards.com/us'
 const IS_DRIVE_PAD = window.location.hash === '#drive'
@@ -37,31 +37,31 @@ export default function App() {
   const [ram, setRam] = useState<RamSnapshot | null>(null)
   const [rushing, setRushing] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [foxSort, setFoxSort] = useState<FoxSort>('id')
+  const [instanceSort, setInstanceSort] = useState<InstanceSort>('id')
   const [dismissedNotices, setDismissedNotices] = useState<string[]>([])
 
   useEffect(() => {
-    return window.foxbox.onRam(setRam)
+    return window.lairscout.onRam(setRam)
   }, [])
 
   useEffect(() => {
-    return window.foxbox.onUpdate(setInstances)
+    return window.lairscout.onUpdate(setInstances)
   }, [])
 
   useEffect(() => {
-    return window.foxbox.onAdmitted(() => {
+    return window.lairscout.onAdmitted(() => {
       if (!muted) playTone(784, 1175)
     })
   }, [muted])
 
   useEffect(() => {
-    return window.foxbox.onQueuePopped(() => {
+    return window.lairscout.onQueuePopped(() => {
       if (!muted) playTone(392, 784)
     })
   }, [muted])
 
   useEffect(() => {
-    return window.foxbox.onQueueMessage(({ notice }) => {
+    return window.lairscout.onQueueMessage(({ notice }) => {
       if (muted) return
       if (notice.kind === 'stock') {
         playTone(196, 392)
@@ -74,7 +74,7 @@ export default function App() {
   }, [muted])
 
   useEffect(() => {
-    void window.foxbox.setFocused(focusedId)
+    void window.lairscout.setFocused(focusedId)
   }, [focusedId])
 
   useEffect(() => {
@@ -88,7 +88,7 @@ export default function App() {
       }
       if (event.type === 'keydown' && event.repeat) return
       event.preventDefault()
-      window.foxbox.key({
+      window.lairscout.key({
         id: '*',
         key: event.key,
         type: event.type === 'keyup' ? 'up' : 'down'
@@ -111,7 +111,7 @@ export default function App() {
     [instances, focusedId]
   )
 
-  const sorted = useMemo(() => sortFoxes(instances, foxSort), [instances, foxSort])
+  const sorted = useMemo(() => sortInstances(instances, instanceSort), [instances, instanceSort])
 
   const queueNotices = useMemo(() => {
     const hidden = new Set(dismissedNotices)
@@ -128,21 +128,21 @@ export default function App() {
 
   const sendAll = (event: FormEvent): void => {
     event.preventDefault()
-    void window.foxbox.gotoAll(url)
+    void window.lairscout.gotoAll(url)
   }
 
   const rushCheckout = (): void => {
     if (rushing) return
     setRushing(true)
-    void window.foxbox.rushCheckout().finally(() => setRushing(false))
+    void window.lairscout.rushCheckout().finally(() => setRushing(false))
   }
 
-  const restartFox = (id: string): void => {
+  const restartScout = (id: string): void => {
     if (liveId === id) setLiveId(null)
-    void window.foxbox.restart(id)
+    void window.lairscout.restart(id)
   }
 
-  const selectFox = (id: string, live: boolean): void => {
+  const selectScout = (id: string, live: boolean): void => {
     setFocusedId(id)
     setLiveId(live ? id : null)
   }
@@ -167,36 +167,36 @@ export default function App() {
         onSendAll={sendAll}
         onRushCheckout={rushCheckout}
         rushing={rushing}
-        onScaleTo={(next) => window.foxbox.scaleTo(next)}
+        onScaleTo={(next) => window.lairscout.scaleTo(next)}
         onToggleMute={() => {
           const next = !muted
           setMuted(next)
-          void window.foxbox.setMuted(next)
+          void window.lairscout.setMuted(next)
         }}
         onToggleDriveAll={() => {
           setDriveAll((value) => {
             const next = !value
             setLiveId(null)
-            if (!next) void window.foxbox.closeDriveWindow()
+            if (!next) void window.lairscout.closeDriveWindow()
             return next
           })
         }}
-        onOpenDriveWindow={() => window.foxbox.openDriveWindow()}
+        onOpenDriveWindow={() => window.lairscout.openDriveWindow()}
         onOpenSettings={() => setSettingsOpen(true)}
-        foxSort={foxSort}
-        onCycleFoxSort={() => setFoxSort((value) => nextFoxSort(value))}
+        instanceSort={instanceSort}
+        onCycleInstanceSort={() => setInstanceSort((value) => nextInstanceSort(value))}
       />
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <div className="workspace">
         <Sidebar
           instances={sorted}
           focusedId={focusedId}
-          onFocus={(id) => selectFox(id, !driveAll)}
-          onRestart={restartFox}
+          onFocus={(id) => selectScout(id, !driveAll)}
+          onRestart={restartScout}
           onKill={(id) => {
             if (focusedId === id) setFocusedId(null)
             if (liveId === id) setLiveId(null)
-            void window.foxbox.kill(id)
+            void window.lairscout.kill(id)
           }}
         />
         <main className={`main ${focused && liveId === focused.id ? 'locked' : ''}`}>
@@ -215,7 +215,7 @@ export default function App() {
           {driveAll ? (
             <div className="drive-layout">
               <p className="hint">
-                Drive all is on. Clicks, scroll, and keys go to every fox. Open Drive window only if you want this on
+                Drive all is on. Clicks, scroll, and keys go to every scout. Open Drive window only if you want this on
                 another monitor.
               </p>
               <DrivePad fox={focused} fleetCount={instances.length} />
@@ -223,9 +223,9 @@ export default function App() {
                 <InstanceGrid
                   instances={sorted}
                   driveAll={driveAll}
-                  onFocus={(id) => selectFox(id, false)}
-                  onGotoOne={(id) => window.foxbox.gotoOne(id, url)}
-                  onRestart={restartFox}
+                  onFocus={(id) => selectScout(id, false)}
+                  onGotoOne={(id) => window.lairscout.gotoOne(id, url)}
+                  onRestart={restartScout}
                 />
               </div>
             </div>
@@ -235,7 +235,7 @@ export default function App() {
               driveAll={false}
               fleetCount={instances.length}
               live
-              onRestart={restartFox}
+              onRestart={restartScout}
               onBack={() => {
                 setLiveId(null)
                 setFocusedId(null)
@@ -245,9 +245,9 @@ export default function App() {
             <InstanceGrid
               instances={sorted}
               driveAll={false}
-              onFocus={(id) => selectFox(id, true)}
-              onGotoOne={(id) => window.foxbox.gotoOne(id, url)}
-              onRestart={restartFox}
+              onFocus={(id) => selectScout(id, true)}
+              onGotoOne={(id) => window.lairscout.gotoOne(id, url)}
+              onRestart={restartScout}
             />
           )}
         </main>

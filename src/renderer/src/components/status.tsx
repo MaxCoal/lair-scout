@@ -14,8 +14,8 @@ export function StatusChip({ status }: { status: SessionStatus }) {
   return <span className={`chip ${status}`}>{LABELS[status]}</span>
 }
 
-export function statusLine(fox: InstanceSnapshot): string {
-  if (fox.error) return fox.error
-  if (fox.statusLabel) return fox.statusLabel
-  return LABELS[fox.status] || 'Waiting'
+export function statusLine(instance: InstanceSnapshot): string {
+  if (instance.error) return instance.error
+  if (instance.statusLabel) return instance.statusLabel
+  return LABELS[instance.status] || 'Waiting'
 }
