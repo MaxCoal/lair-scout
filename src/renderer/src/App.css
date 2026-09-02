@@ -46,25 +46,36 @@ input {
 .shell {
   height: 100%;
   display: grid;
-  grid-template-rows: 64px 1fr;
+  grid-template-rows: auto 1fr;
 }
 
 .topbar {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 16px;
-  align-items: center;
-  padding: 0 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 16px;
   border-bottom: 1px solid var(--line);
   background: rgba(12, 13, 16, 0.82);
   backdrop-filter: blur(16px);
+}
+
+.top-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.top-row.tools {
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .brand {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-width: 140px;
+  flex: 0 0 auto;
 }
 
 .brand-mark {
@@ -84,6 +95,7 @@ input {
 .nav-form {
   display: flex;
   gap: 8px;
+  flex: 1;
   min-width: 0;
 }
 
@@ -110,18 +122,14 @@ input {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
-}
-
-.meters {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  margin-left: auto;
 }
 
 .stepper {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex: 0 0 auto;
 }
 
 .count-input {
@@ -143,8 +151,8 @@ input {
 
 .ram-meter {
   position: relative;
-  min-width: 210px;
-  height: 40px;
+  min-width: 0;
+  height: 32px;
   border: 1px solid var(--line-strong);
   background: var(--bg-elev);
   border-radius: 10px;
@@ -154,9 +162,17 @@ input {
   padding: 0 10px;
 }
 
-.ram-meter.cpu,
-.ram-meter.gpu {
-  min-width: 92px;
+.ram-meter.combined {
+  flex: 0 1 auto;
+}
+
+.ram-meter span i {
+  display: inline-block;
+  width: 1px;
+  height: 10px;
+  margin: 0 8px;
+  background: var(--line-strong);
+  vertical-align: middle;
 }
 
 .ram-bar {
