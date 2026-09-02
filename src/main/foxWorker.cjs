@@ -274,6 +274,45 @@ function noticeFromInner(inner) {
   }
 }
 
+async function scrapeMessageDom(page) {
+  for (const frame of page.frames()) {
+    const frameUrl = frame.url()
+    if (/youtube|google|doubleclick|facebook/i.test(frameUrl)) continue
+    const text = await frame
+      .locator('#MainPart_pMessageOnQueueTicket')
+      .innerText({ timeout: 80 })
+      .catch(() => '')
+    if (text && text.trim()) {
+      const header = await frame
+        .locator('#MainPart_h2MessageOnQueueTicket')
+        .innerText({ timeout: 80 })
+        .catch(() => 'Message last updated:')
+      const stamp = await frame
+        .locator('#MainPart_h2MessageOnQueueTicketTimeText')
+        .innerText({ timeout: 80 })
+        .catch(() => '')
+      const zone = await frame
+        .locator('#MainPart_h2MessageOnQueueTicketTimeTextTimeZonePostfix')
+        .innerText({ timeout: 80 })
+        .catch(() => '')
+      return {
+        messageId: '',
+        messageHeader: String(header || 'Message last updated:').trim(),
+        messageTime: `${stamp} ${zone}`.replace(/\u202f/g, ' ').replace(/\s+/g, ' ').trim(),
+        messageText: text.trim()
+      }
+    }
+    const box = await frame
+      .locator('#MainPart_divTimeBox')
+      .innerText({ timeout: 80 })
+      .catch(() => '')
+    if (/message last updated|sold out|out of stock/i.test(box)) {
+      return noticeFromInner(box) || { messageId: '', messageHeader: 'Message', messageTime: '', messageText: box.trim() }
+    }
+  }
+  return null
+}
+
 async function inspectPage(page, previous, wasInQueue) {
   const url = page.url()
   const host = hostOf(url)
@@ -300,6 +339,15 @@ async function inspectPage(page, previous, wasInQueue) {
         extracted.messageHeader = fromInner.messageHeader
         extracted.messageTime = fromInner.messageTime
         extracted.messageText = fromInner.messageText
+      }
+    }
+    if (!extracted.messageText) {
+      const fromDom = await scrapeMessageDom(page)
+      if (fromDom?.messageText) {
+        extracted.messageId = fromDom.messageId || extracted.messageId
+        extracted.messageHeader = fromDom.messageHeader || extracted.messageHeader
+        extracted.messageTime = fromDom.messageTime || extracted.messageTime
+        extracted.messageText = fromDom.messageText
       }
     }
   } catch {
@@ -674,39 +722,36 @@ async function inspectFox(fox) {
     fox.statusLabel = 'Error'
     return
   }
-  if (fox.navigating && /about:blank|^data:/i.test(page.url() || '')) {
-    fox.status = 'loading'
-    if (!fox.statusLabel) fox.statusLabel = 'Loading'
-    return
-  }
-  const previous = fox.status
-  const read = await inspectPage(page, previous, fox.wasInQueue)
-  if (read.status === 'in_queue' || read.status === 'waiting_for_queue') fox.wasInQueue = true
-  if (read.status === 'in_queue' || read.status === 'waiting_for_queue' || read.queueNotice) {
+  try {
+    const previous = fox.status
+    const read = await inspectPage(page, previous, fox.wasInQueue)
+    if (read.status === 'in_queue' || read.status === 'waiting_for_queue') fox.wasInQueue = true
     fox.navigating = false
-  }
-  fox.status = read.status
-  fox.statusLabel = read.statusLabel
-  fox.waitTime = read.waitTime
-  fox.queueNumber = read.queueNumber
-  fox.url = read.url
-  fox.host = read.host
-  fox.title = read.title
-  fox.error = read.status === 'error' ? fox.error || 'Could not read page' : undefined
-  const notice = read.queueNotice
-  fox.queueNotice = notice
-  const noticeKey = notice ? `${notice.id}|${notice.kind}|${notice.text}` : ''
-  if (notice && noticeKey !== fox.lastNoticeId) {
-    fox.lastNoticeId = noticeKey
-    send({ type: 'event', event: 'queueMessage', payload: { foxId: fox.id, notice } })
-  }
-  if (!notice) fox.lastNoticeId = ''
-  if (isQueuePopEdge(previous, fox.status)) {
-    send({ type: 'event', event: 'queuePopped', payload: fox.id })
-  }
-  if (isAdmissionEdge(previous, fox.status)) {
-    fox.admittedFlashUntil = Date.now() + 12000
-    send({ type: 'event', event: 'admitted', payload: fox.id })
+    fox.status = read.status
+    fox.statusLabel = read.statusLabel
+    fox.waitTime = read.waitTime
+    fox.queueNumber = read.queueNumber
+    fox.url = read.url
+    fox.host = read.host
+    fox.title = read.title
+    fox.error = read.status === 'error' ? fox.error || 'Could not read page' : undefined
+    const notice = read.queueNotice
+    fox.queueNotice = notice
+    const noticeKey = notice ? `${notice.id}|${notice.kind}|${notice.text}` : ''
+    if (notice && noticeKey !== fox.lastNoticeId) {
+      fox.lastNoticeId = noticeKey
+      send({ type: 'event', event: 'queueMessage', payload: { foxId: fox.id, notice } })
+    }
+    if (!notice) fox.lastNoticeId = ''
+    if (isQueuePopEdge(previous, fox.status)) {
+      send({ type: 'event', event: 'queuePopped', payload: fox.id })
+    }
+    if (isAdmissionEdge(previous, fox.status)) {
+      fox.admittedFlashUntil = Date.now() + 12000
+      send({ type: 'event', event: 'admitted', payload: fox.id })
+    }
+  } catch {
+    /* keep last known status */
   }
 }
 
@@ -773,10 +818,7 @@ function isOnQueue(url) {
 }
 
 function setRushLabel(fox, label) {
-  fox.navigating = true
-  fox.status = 'loading'
   fox.statusLabel = label
-  fox.error = undefined
   emitUpdate()
 }
 

@@ -425,7 +425,10 @@ export class FirefoxManager {
     const existing = this.workers.get(id)
     if (existing) return existing
 
-    const workerPath = join(__dirname, 'foxWorker.cjs')
+    const workerPath =
+      !app.isPackaged && existsSync(join(process.cwd(), 'src/main/foxWorker.cjs'))
+        ? join(process.cwd(), 'src/main/foxWorker.cjs')
+        : join(__dirname, 'foxWorker.cjs')
     const nodePath = resolveNode()
     const env = { ...process.env }
     delete env.PLAYWRIGHT_BROWSERS_PATH

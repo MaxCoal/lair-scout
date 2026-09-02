@@ -8,23 +8,30 @@ const sharedAlias = {
   '@shared': resolve('src/shared')
 }
 
-function copyWin32Script(): Plugin {
+function copyRuntimeFiles(): Plugin {
+  const files = ['win32.ps1', 'win32-host.ps1', 'foxWorker.cjs']
   const copy = (): void => {
     mkdirSync('out/main', { recursive: true })
-    cpSync('src/main/win32.ps1', 'out/main/win32.ps1')
-    cpSync('src/main/win32-host.ps1', 'out/main/win32-host.ps1')
-    cpSync('src/main/foxWorker.cjs', 'out/main/foxWorker.cjs')
+    for (const name of files) cpSync(`src/main/${name}`, `out/main/${name}`)
   }
   return {
-    name: 'copy-win32-ps1',
+    name: 'copy-runtime-files',
     buildStart: copy,
-    closeBundle: copy
+    closeBundle: copy,
+    configureServer(server) {
+      copy()
+      for (const name of files) server.watcher.add(resolve(`src/main/${name}`))
+      server.watcher.on('change', (file) => {
+        const norm = file.replace(/\\/g, '/')
+        if (files.some((name) => norm.endsWith(`src/main/${name}`))) copy()
+      })
+    }
   }
 }
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin(), copyWin32Script()],
+    plugins: [externalizeDepsPlugin(), copyRuntimeFiles()],
     resolve: { alias: sharedAlias }
   },
   preload: {
