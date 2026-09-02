@@ -137,17 +137,23 @@ public static class LairScoutNative {
     const int WS_BORDER = 0x00800000;
     const int WS_VISIBLE = 0x10000000;
     int style = GetWindowLong(hwnd, GWL_STYLE);
+    int next = style;
     if (embedded) {
-      style |= WS_CHILD | WS_VISIBLE;
-      style &= ~(WS_POPUP | WS_CAPTION | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_BORDER);
+      next |= WS_CHILD | WS_VISIBLE;
+      next &= ~(WS_POPUP | WS_CAPTION | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_BORDER);
     } else {
-      style &= ~WS_CHILD;
-      style |= WS_POPUP | WS_CAPTION | WS_THICKFRAME | WS_SYSMENU | WS_VISIBLE;
+      next &= ~WS_CHILD;
+      next |= WS_POPUP | WS_CAPTION | WS_THICKFRAME | WS_SYSMENU | WS_VISIBLE;
     }
-    SetWindowLong(hwnd, GWL_STYLE, style);
+    if (next == style) return;
+    SetWindowLong(hwnd, GWL_STYLE, next);
   }
 
   public static void EmbedAt(IntPtr hwnd, IntPtr owner, int screenX, int screenY, int w, int h) {
+    if (owner != IntPtr.Zero && GetParent(hwnd) == owner) {
+      MoveEmbedded(hwnd, owner, screenX, screenY, w, h);
+      return;
+    }
     if (owner != IntPtr.Zero) SetParent(hwnd, owner);
     SetEmbedded(hwnd, owner != IntPtr.Zero);
     SetTaskbar(hwnd, false);
@@ -161,15 +167,10 @@ public static class LairScoutNative {
       x = p.X;
       y = p.Y;
     }
-    SetWindowPos(hwnd, IntPtr.Zero, x, y, w, h, 0x0010 | 0x0020);
-    SetFocus(hwnd);
+    SetWindowPos(hwnd, IntPtr.Zero, x, y, w, h, 0x0004 | 0x0010);
   }
 
   public static void MoveEmbedded(IntPtr hwnd, IntPtr owner, int screenX, int screenY, int w, int h) {
-    if (owner != IntPtr.Zero && GetParent(hwnd) != owner) {
-      EmbedAt(hwnd, owner, screenX, screenY, w, h);
-      return;
-    }
     int x = screenX;
     int y = screenY;
     if (owner != IntPtr.Zero) {
@@ -187,9 +188,9 @@ public static class LairScoutNative {
     const int GWL_STYLE = -16;
     const int WS_CLIPCHILDREN = 0x02000000;
     int style = GetWindowLong(hwnd, GWL_STYLE);
-    if (clip) style |= WS_CLIPCHILDREN;
-    else style &= ~WS_CLIPCHILDREN;
-    SetWindowLong(hwnd, GWL_STYLE, style);
+    int next = clip ? (style | WS_CLIPCHILDREN) : (style & ~WS_CLIPCHILDREN);
+    if (next == style) return;
+    SetWindowLong(hwnd, GWL_STYLE, next);
     SetWindowPos(hwnd, IntPtr.Zero, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020);
   }
 

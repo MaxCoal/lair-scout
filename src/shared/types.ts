@@ -75,8 +75,14 @@ export type RamSnapshot = {
 }
 
 export type ShippingProfile = {
-  name: string
-  address: string
+  email: string
+  firstName: string
+  lastName: string
+  address1: string
+  address2: string
+  city: string
+  state: string
+  zip: string
 }
 
 export type ThemeId = 'dungeon' | 'daylight'

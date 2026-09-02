@@ -38,7 +38,7 @@ Close the terminal that launched the app to shut it down.
 3. Use **Cart & queue** when the product page is up. That adds to cart, continues as guest, and enters the Queue-it waiting room.
 4. Watch status chips for lounge / in-queue / admitted. Alerts fire when a queue starts, a session is admitted, or a lounge message (including sold out) appears.
 
-**Drive all** sends clicks, scroll, and keys to every scout. Open a scout to interact with that window only. Checkout name and address can be saved under Settings; they are stored on this machine and filled into guest checkout forms.
+**Drive all** sends clicks, scroll, and keys to every scout. Open a scout to interact with that window only. Checkout fields (email, name, address) are saved under Settings and filled into guest checkout.
 
 ## Notes
 

@@ -28,7 +28,16 @@ let focusedId = null
 let shuttingDown = false
 let ticking = false
 let spawning = false
-let shippingProfile = { name: '', address: '' }
+let shippingProfile = {
+  email: '',
+  firstName: '',
+  lastName: '',
+  address1: '',
+  address2: '',
+  city: '',
+  state: '',
+  zip: ''
+}
 
 function send(message) {
   process.stdout.write(`${JSON.stringify(message)}\n`)
@@ -499,12 +508,28 @@ function getBrowserPid(context) {
   }
 }
 
-function parseAddress(profile) {
-  const name = String(profile?.name || '').trim()
-  const raw = String(profile?.address || '').trim()
-  const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
-  const bits = name.split(/\s+/).filter(Boolean)
-  let street = lines[0] || raw
+function hasShipping(profile) {
+  if (!profile) return false
+  return Boolean(
+    profile.email ||
+      profile.firstName ||
+      profile.lastName ||
+      profile.address1 ||
+      profile.address2 ||
+      profile.city ||
+      profile.state ||
+      profile.zip ||
+      profile.name ||
+      profile.address
+  )
+}
+
+function parseAddressBlob(raw) {
+  const lines = String(raw || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+  let street = lines[0] || String(raw || '').trim()
   let street2 = ''
   let city = ''
   let state = ''
@@ -539,28 +564,60 @@ function parseAddress(profile) {
   } else if (lines.length > 1) {
     street2 = lines.slice(1).join(', ')
   }
-  return {
-    name,
-    firstName: bits[0] || '',
-    lastName: bits.slice(1).join(' ') || '',
-    street,
-    street2,
-    city,
-    state,
-    zip,
-    address: raw
+  return { street, street2, city, state, zip }
+}
+
+function parseAddress(profile) {
+  const email = String(profile?.email || '').trim()
+  let firstName = String(profile?.firstName || '').trim()
+  let lastName = String(profile?.lastName || '').trim()
+  const blobName = String(profile?.name || '').trim()
+  if ((!firstName || !lastName) && blobName) {
+    const bits = blobName.split(/\s+/).filter(Boolean)
+    if (!firstName) firstName = bits[0] || ''
+    if (!lastName) lastName = bits.slice(1).join(' ')
   }
+  let street = String(profile?.address1 || '').trim()
+  let street2 = String(profile?.address2 || '').trim()
+  let city = String(profile?.city || '').trim()
+  let state = String(profile?.state || '')
+    .trim()
+    .toUpperCase()
+  let zip = String(profile?.zip || '').trim()
+  const raw = String(profile?.address || '').trim()
+  if (raw && (!street || !city || !zip)) {
+    const parsed = parseAddressBlob(raw)
+    street = street || parsed.street
+    street2 = street2 || parsed.street2
+    city = city || parsed.city
+    state = state || parsed.state
+    zip = zip || parsed.zip
+  }
+  const name = [firstName, lastName].filter(Boolean).join(' ') || blobName
+  const address =
+    [street, street2, [city, state, zip].filter(Boolean).join(' ')].filter(Boolean).join('\n') || raw
+  return { email, firstName, lastName, name, street, street2, city, state, zip, address }
 }
 
 function fillProfileInPage(data) {
-  if (!data || (!data.name && !data.street && !data.address)) return 0
+  if (
+    !data ||
+    !(data.email || data.firstName || data.lastName || data.name || data.street || data.city || data.zip || data.address)
+  ) {
+    return 0
+  }
   const setValue = (el, value) => {
     if (!el || !value || el.disabled || el.readOnly) return false
     const next = String(value)
     const current = String(el.value || '')
-    if (current === next) return false
-    if (document.activeElement === el && current && current !== next) return false
+    if (current === next) return true
     const tag = el.tagName
+    try {
+      el.click()
+      el.focus()
+    } catch {
+      /* ignore */
+    }
     if (tag === 'SELECT') {
       const want = next.toLowerCase()
       const opt = [...el.options].find(
@@ -575,13 +632,52 @@ function fillProfileInPage(data) {
     } else {
       const proto = tag === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
       const desc = Object.getOwnPropertyDescriptor(proto, 'value')
+      const tracker = el._valueTracker
+      if (tracker && typeof tracker.setValue === 'function') tracker.setValue(current)
       if (desc && desc.set) desc.set.call(el, next)
       else el.value = next
     }
     el.dispatchEvent(new Event('input', { bubbles: true }))
-    el.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertFromPaste', data: next }))
+    try {
+      el.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertFromPaste', data: next }))
+    } catch {
+      /* ignore */
+    }
     el.dispatchEvent(new Event('change', { bubbles: true }))
+    el.dispatchEvent(new Event('blur', { bubbles: true }))
+    el.dispatchEvent(new Event('focusout', { bubbles: true }))
     return true
+  }
+  const labelText = (el) => {
+    const bits = []
+    if (el.labels) for (const lab of el.labels) bits.push(lab.innerText || lab.textContent || '')
+    if (el.id) {
+      try {
+        const lab = document.querySelector(`label[for="${CSS.escape(el.id)}"]`)
+        if (lab) bits.push(lab.innerText || lab.textContent || '')
+      } catch {
+        /* ignore */
+      }
+    }
+    const labelled = el.getAttribute('aria-labelledby')
+    if (labelled) {
+      for (const id of labelled.split(/\s+/)) {
+        const node = document.getElementById(id)
+        if (node) bits.push(node.innerText || node.textContent || '')
+      }
+    }
+    const wrap = el.closest('label')
+    if (wrap) bits.push(wrap.innerText || wrap.textContent || '')
+    const prev = el.previousElementSibling
+    if (prev && /label/i.test(prev.tagName)) bits.push(prev.innerText || prev.textContent || '')
+    const next = el.nextElementSibling
+    if (next && /label/i.test(next.tagName)) bits.push(next.innerText || next.textContent || '')
+    const parent = el.parentElement
+    if (parent) {
+      const direct = parent.querySelectorAll(':scope > label')
+      if (direct.length === 1) bits.push(direct[0].innerText || direct[0].textContent || '')
+    }
+    return bits.join(' ')
   }
   const blobOf = (el) =>
     [
@@ -594,19 +690,29 @@ function fillProfileInPage(data) {
       el.getAttribute('formcontrolname'),
       el.getAttribute('data-internal-id'),
       el.getAttribute('data-template-value'),
-      el.getAttribute('data-field')
+      el.getAttribute('data-field'),
+      labelText(el)
     ]
       .filter(Boolean)
       .join(' ')
       .toLowerCase()
+      .replace(/\s+/g, ' ')
+  const collect = (root, out) => {
+    if (!root) return out
+    for (const el of root.querySelectorAll('input, textarea, select')) out.push(el)
+    for (const el of root.querySelectorAll('*')) {
+      if (el.shadowRoot) collect(el.shadowRoot, out)
+    }
+    return out
+  }
   let filled = 0
-  const nodes = [...document.querySelectorAll('input, textarea, select')]
+  const nodes = collect(document, [])
   for (const el of nodes) {
     const type = (el.getAttribute('type') || 'text').toLowerCase()
     if (['hidden', 'checkbox', 'radio', 'password', 'submit', 'button', 'file'].includes(type)) continue
     const blob = blobOf(el)
     const auto = String(el.autocomplete || '').toLowerCase()
-    if (/email/.test(blob) || auto === 'email') continue
+    const isEmail = type === 'email' || auto === 'email' || /(^|[^a-z])e-?mail([^a-z]|$)/.test(blob)
     const isFirst = /first[-_\s]?name|given[-_\s]?name/.test(blob) || auto === 'given-name'
     const isLast = /last[-_\s]?name|family[-_\s]?name|surname/.test(blob) || auto === 'family-name'
     const isFullName =
@@ -616,14 +722,17 @@ function fillProfileInPage(data) {
     const isStreet2 =
       /address[-_\s]?(line[-_\s]?)?2|address2|addr2|apt|suite|unit/.test(blob) || auto === 'address-line2'
     const isStreet =
-      /street[-_\s]?address|shipping[-_\s]?address|billing[-_\s]?address|address[-_\s]?(line[-_\s]?)?1|address1|addr1|shippingaddress|billingaddress|(^|[-_\s.])address($|[-_\s.])/.test(
+      /street|address[-_\s]?(line[-_\s]?)?1|address1|addr1|shippingaddress|billingaddress|shipping[-_\s]?address|billing[-_\s]?address|(^|[-_\s.])address($|[-_\s.*])/.test(
         blob
       ) ||
       auto === 'street-address' ||
       auto === 'address-line1'
-    if (isFirst && data.firstName) filled += setValue(el, data.firstName) ? 1 : 0
+    const isSearch = /type[-_\s]?to[-_\s]?search|start typing|find address|address search|lookup address/.test(blob)
+    if (isEmail && data.email) filled += setValue(el, data.email) ? 1 : 0
+    else if (isFirst && data.firstName) filled += setValue(el, data.firstName) ? 1 : 0
     else if (isLast && data.lastName) filled += setValue(el, data.lastName) ? 1 : 0
     else if (isFullName && !/user|login|account|company|card/.test(blob) && data.name) filled += setValue(el, data.name) ? 1 : 0
+    else if (isSearch && data.address) filled += setValue(el, data.address) ? 1 : 0
     else if (isStreet2 && data.street2) filled += setValue(el, data.street2) ? 1 : 0
     else if (isStreet && data.street) filled += setValue(el, data.street) ? 1 : 0
     else if ((/city|town|locality|shipping[-_\s]?city/.test(blob) || auto === 'address-level2') && data.city)
@@ -636,11 +745,110 @@ function fillProfileInPage(data) {
   return filled
 }
 
+async function tryFill(locator, value) {
+  if (!value) return
+  try {
+    const loc = locator.first()
+    if (!(await loc.count().catch(() => 0))) return
+    await loc.fill(String(value), { timeout: 500 })
+  } catch {
+    /* ignore */
+  }
+}
+
+async function trySelect(locator, value) {
+  if (!value) return
+  try {
+    const loc = locator.first()
+    if (!(await loc.count().catch(() => 0))) return
+    const next = String(value)
+    await loc.selectOption({ value: next }, { timeout: 400 }).catch(() =>
+      loc.selectOption({ label: next }, { timeout: 400 }).catch(() => loc.fill(next, { timeout: 400 }))
+    )
+  } catch {
+    /* ignore */
+  }
+}
+
+function isCheckoutUrl(url) {
+  return /cart|checkout|billing|shipping/i.test(String(url || ''))
+}
+
 async function applyShippingToFox(fox) {
   const page = pageOf(fox)
-  if (!page || (!shippingProfile.name && !shippingProfile.address)) return
+  if (!page || !hasShipping(shippingProfile)) return
+  if (!isCheckoutUrl(page.url())) return
   const data = parseAddress(shippingProfile)
+  await fillWithPlaywright(page, data)
   await Promise.all(page.frames().map((frame) => frame.evaluate(fillProfileInPage, data).catch(() => 0)))
+}
+
+async function fillWithPlaywright(page, data) {
+  const jobs = [
+    {
+      role: /e-?mail/i,
+      sel: 'input[type="email"], input[autocomplete="email"], input[name="email" i], input[id="email" i], input[name="Email" i]'
+    },
+    {
+      role: /first name|given name/i,
+      sel: 'input[autocomplete="given-name"], input[name="FirstName" i], input[id="FirstName" i], input[name="firstName" i], input[name="first_name" i]'
+    },
+    {
+      role: /last name|family name|surname/i,
+      sel: 'input[autocomplete="family-name"], input[name="LastName" i], input[id="LastName" i], input[name="lastName" i], input[name="last_name" i]'
+    },
+    {
+      role: /address line 1|street address/i,
+      sel: 'input[autocomplete="street-address"], input[autocomplete="address-line1"], input[name="Address1" i], input[name="address1" i], input[id="Address1" i], input[id="address1" i], [data-template-value="checkout.customer.shipping_address"]'
+    },
+    {
+      role: /address line 2/i,
+      sel: 'input[autocomplete="address-line2"], input[name="Address2" i], input[id="Address2" i], input[name="address2" i]'
+    },
+    {
+      role: /^(city|town|locality)$/i,
+      sel: 'input[autocomplete="address-level2"], input[name="City" i], input[id="City" i], [data-template-value="checkout.customer.shipping_city"]'
+    },
+    {
+      role: /^(state|province|region)$/i,
+      sel: 'select[autocomplete="address-level1"], select[name="State" i], select[id="State" i], input[name="State" i], input[name="state" i], [data-template-value="checkout.customer.shipping_state"]',
+      select: true
+    },
+    {
+      role: /zip|postal/i,
+      sel: 'input[autocomplete="postal-code"], input[name="Zip" i], input[name="PostalCode" i], input[id="Zip" i], input[name="zip" i], [data-template-value="checkout.customer.shipping_zip"]'
+    }
+  ]
+  const values = [
+    data.email,
+    data.firstName,
+    data.lastName,
+    data.street,
+    data.street2,
+    data.city,
+    data.state,
+    data.zip
+  ]
+  for (const frame of page.frames()) {
+    for (let i = 0; i < jobs.length; i += 1) {
+      const val = values[i]
+      if (!val) continue
+      const { role, sel, select } = jobs[i]
+      if (select) {
+        await trySelect(frame.getByLabel(role), val)
+        await trySelect(frame.locator(sel), val)
+        await tryFill(frame.getByRole('textbox', { name: role }), val)
+        continue
+      }
+      await tryFill(frame.getByRole('textbox', { name: role }), val)
+      await tryFill(frame.getByLabel(role), val)
+      await tryFill(frame.getByPlaceholder(role), val)
+      await tryFill(frame.locator(sel), val)
+    }
+    if (data.name) {
+      await tryFill(frame.locator('input[autocomplete="name"], input[name="FullName" i], input[id="FullName" i]'), data.name)
+    }
+  }
 }
 
 function scheduleFill(fox) {
@@ -1073,9 +1281,18 @@ async function handle(msg) {
     } else if (cmd === 'rushCheckout') {
       await Promise.allSettled([...instances.values()].map((fox) => rushCheckoutFox(fox)))
     } else if (cmd === 'setProfile') {
+      const profile = msg.profile || {}
       shippingProfile = {
-        name: String(msg.profile?.name || ''),
-        address: String(msg.profile?.address || '')
+        email: String(profile.email || ''),
+        firstName: String(profile.firstName || ''),
+        lastName: String(profile.lastName || ''),
+        address1: String(profile.address1 || ''),
+        address2: String(profile.address2 || ''),
+        city: String(profile.city || ''),
+        state: String(profile.state || ''),
+        zip: String(profile.zip || ''),
+        name: String(profile.name || ''),
+        address: String(profile.address || '')
       }
       for (const fox of instances.values()) scheduleFill(fox)
     } else if (cmd === 'reload') {

@@ -645,6 +645,7 @@ input {
 }
 
 .focus-stage {
+  position: relative;
   min-height: 0;
   border-radius: var(--radius);
   overflow: hidden;
@@ -658,6 +659,14 @@ input {
   height: 100%;
   background: var(--stage-bg);
   contain: layout size;
+  pointer-events: none;
+}
+
+.focus-stage.live .placeholder {
+  position: absolute;
+  inset: 0;
+  aspect-ratio: auto;
+  height: 100%;
 }
 
 .drive-shell {
@@ -715,7 +724,9 @@ input {
 }
 
 .modal {
-  width: min(440px, calc(100vw - 32px));
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  overflow: auto;
   display: grid;
   gap: 12px;
   padding: 16px;
@@ -736,6 +747,37 @@ input {
   gap: 6px;
   color: var(--muted);
   font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.field-row.city-row {
+  grid-template-columns: 1fr 72px 110px;
+}
+
+.checkout-preview {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 10px;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.45;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.checkout-preview span {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 11px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }

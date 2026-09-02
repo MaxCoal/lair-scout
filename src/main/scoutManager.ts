@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import type { AppSettings, InstanceSnapshot, RamSnapshot, ShippingProfile } from '@shared/types'
 import { findScoutWindow, hideScoutWindow, moveScoutWindow, placeScoutWindow, postWindowMessage, setClipChildren, showWindow, stopWin32Host } from './win32'
 import { readRam } from './memory'
-import { emptySettings, loadSettings, saveSettings } from './settings'
+import { emptySettings, emptyShipping, loadSettings, normalizeShipping, saveSettings } from './settings'
 
 const DEFAULT_COUNT = 2
 const MAX_FLEET = 20
@@ -45,7 +45,7 @@ export class ScoutManager {
   private windows = new Map<string, WindowState>()
   private muted = false
   private shuttingDown = false
-  private shipping: ShippingProfile = { name: '', address: '' }
+  private shipping: ShippingProfile = emptyShipping()
   private settings: AppSettings = emptySettings()
   private dockTimer: NodeJS.Timeout | null = null
   private ramTimer: NodeJS.Timeout | null = null
@@ -57,6 +57,7 @@ export class ScoutManager {
   private clipOn = false
   private mouseHooked = false
   private interactChain: Promise<void> = Promise.resolve()
+  private lastWinSize = { width: 0, height: 0 }
   private stageRect: StageRect | null = null
   private strayState: 'pending' | 'cleaning' | 'done' = 'pending'
   private strayDone: Promise<void>
@@ -73,18 +74,20 @@ export class ScoutManager {
     this.window = window
     this.armDockTimer()
     this.armRamTimer()
-    this.hookMouseMessages(window)
     void loadSettings().then((settings) => {
       this.settings = settings
-      this.shipping = { name: settings.name, address: settings.address }
+      this.shipping = normalizeShipping(settings)
       this.broadcastSettings()
       void this.pushProfile()
     })
-    window.on('move', () => {
-      this.scheduleRelayout(false)
-    })
+    this.hookTiltWheel(window)
+    this.lastWinSize = { width: window.getSize()[0], height: window.getSize()[1] }
     window.on('resize', () => {
-      this.scheduleRelayout(true)
+      if (!this.window || this.window.isDestroyed()) return
+      const [width, height] = this.window.getSize()
+      if (Math.abs(width - this.lastWinSize.width) < 4 && Math.abs(height - this.lastWinSize.height) < 4) return
+      this.lastWinSize = { width, height }
+      this.scheduleRelayout(false)
     })
   }
 
@@ -94,7 +97,7 @@ export class ScoutManager {
 
   async saveProfile(settings: AppSettings): Promise<AppSettings> {
     this.settings = await saveSettings(settings)
-    this.shipping = { name: this.settings.name, address: this.settings.address }
+    this.shipping = normalizeShipping(this.settings)
     this.broadcastSettings()
     await this.pushProfile()
     return this.settings
@@ -253,25 +256,30 @@ export class ScoutManager {
   }
 
   async stopInteract(id: string): Promise<void> {
-    const state = this.windows.get(id)
-    if (!state) return
-    if (state.poppedOut) {
+    const run = async (): Promise<void> => {
+      const state = this.windows.get(id)
+      if (!state) return
+      if (state.poppedOut) {
+        state.interacting = false
+        return
+      }
+      if (!state.interacting) return
       state.interacting = false
-      return
+      state.lastPhys = undefined
+      state.hwnd = await hideScoutWindow({
+        pid: state.pid,
+        hwnd: state.hwnd,
+        title: `LairScout-${id}`,
+        owner: this.ownerHwnd()
+      })
+      this.fireOn(id, 'setPaused', { foxId: id, paused: false })
+      if (![...this.windows.values()].some((item) => item.interacting)) {
+        await this.ensureClip(false)
+      }
+      this.broadcast()
     }
-    state.interacting = false
-    state.lastPhys = undefined
-    state.hwnd = await hideScoutWindow({
-      pid: state.pid,
-      hwnd: state.hwnd,
-      title: `LairScout-${id}`,
-      owner: this.ownerHwnd()
-    })
-    this.fireOn(id, 'setPaused', { foxId: id, paused: false })
-    if (![...this.windows.values()].some((item) => item.interacting)) {
-      await this.ensureClip(false)
-    }
-    this.broadcast()
+    this.interactChain = this.interactChain.then(run, run)
+    await this.interactChain
   }
 
   async popOut(id: string): Promise<void> {
@@ -325,11 +333,7 @@ export class ScoutManager {
   private async embedLive(id: string, state: WindowState, rect: StageRect): Promise<void> {
     if (rect.width < 80 || rect.height < 60) return
     if (state.poppedOut) return
-    if (state.interacting) {
-      const moved = await this.placeState(id, state, rect, 'move')
-      if (moved) state.hwnd = moved
-      return
-    }
+    if (state.interacting) return
     state.interacting = true
     state.poppedOut = false
     this.fireOn(id, 'setPaused', { foxId: id, paused: true })
@@ -417,22 +421,19 @@ export class ScoutManager {
     return buf.length >= 8 ? Number(buf.readBigUInt64LE(0)) : buf.readUInt32LE(0)
   }
 
-  private hookMouseMessages(window: BrowserWindow): void {
+  private hookTiltWheel(window: BrowserWindow): void {
     if (this.mouseHooked) return
     this.mouseHooked = true
-    const messages = [0x020e, 0x0207, 0x0208, 0x0209]
-    for (const msg of messages) {
-      try {
-        window.hookWindowMessage(msg, (wParam, lParam) => {
-          void this.forwardMouse(msg, wParam, lParam)
-        })
-      } catch {
-        /* not Windows / unsupported */
-      }
+    try {
+      window.hookWindowMessage(0x020e, (wParam, lParam) => {
+        void this.forwardTilt(wParam, lParam)
+      })
+    } catch {
+      /* not Windows / unsupported */
     }
   }
 
-  private async forwardMouse(msg: number, wParam: Buffer | number, lParam: Buffer | number): Promise<void> {
+  private async forwardTilt(wParam: Buffer | number, lParam: Buffer | number): Promise<void> {
     let hwnd = 0
     for (const state of this.windows.values()) {
       if (state.interacting && state.hwnd) {
@@ -441,7 +442,7 @@ export class ScoutManager {
       }
     }
     if (!hwnd) return
-    await postWindowMessage(hwnd, msg, wordToUInt(wParam), wordToUInt(lParam))
+    await postWindowMessage(hwnd, 0x020e, wordToUInt(wParam), wordToUInt(lParam))
   }
 
   private async ensureClip(clip: boolean): Promise<void> {
@@ -476,12 +477,11 @@ export class ScoutManager {
       return
     }
     this.relayoutBusy = true
-    const allowResize = this.relayoutAllowResize
     this.relayoutAllowResize = false
     try {
       for (const [id, state] of this.windows) {
-        if (!state.interacting) continue
-        const hwnd = await this.placeState(id, state, this.stageRect, allowResize ? 'place' : 'move')
+        if (!state.interacting || state.poppedOut) continue
+        const hwnd = await this.placeState(id, state, this.stageRect, 'move')
         if (hwnd) state.hwnd = hwnd
       }
     } finally {
