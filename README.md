@@ -1,4 +1,4 @@
-# Lair Scout
+# <img src="src/renderer/src/assets/lair-scout-mark.png" width="48" height="48" alt=""> Lair Scout
 
 Lair Scout is a Windows desktop app for running and monitoring isolated Chromium sessions during [Secret Lair](https://secretlair.wizards.com) drops.
 
