@@ -46,6 +46,7 @@ public static class FoxBoxNative {
   [DllImport("user32.dll")] public static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
   [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")] public static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
   [DllImport("user32.dll")] public static extern IntPtr SetParent(IntPtr hWndChild, IntPtr hWndNewParent);
+  [DllImport("user32.dll")] public static extern IntPtr GetParent(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern bool ScreenToClient(IntPtr hWnd, ref FoxPoint lpPoint);
   [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
   [DllImport("shcore.dll")] public static extern int SetProcessDpiAwareness(int value);
@@ -160,6 +161,34 @@ public static class FoxBoxNative {
     }
     ShowWindow(hwnd, 8);
     SetWindowPos(hwnd, IntPtr.Zero, x, y, w, h, 0x0040 | 0x0020);
+  }
+
+  public static void MoveEmbedded(IntPtr hwnd, IntPtr owner, int screenX, int screenY, int w, int h) {
+    if (owner != IntPtr.Zero && GetParent(hwnd) != owner) {
+      EmbedAt(hwnd, owner, screenX, screenY, w, h);
+      return;
+    }
+    int x = screenX;
+    int y = screenY;
+    if (owner != IntPtr.Zero) {
+      FoxPoint p = new FoxPoint();
+      p.X = screenX;
+      p.Y = screenY;
+      ScreenToClient(owner, ref p);
+      x = p.X;
+      y = p.Y;
+    }
+    SetWindowPos(hwnd, IntPtr.Zero, x, y, w, h, 0x0004 | 0x0010);
+  }
+
+  public static void SetClipChildren(IntPtr hwnd, bool clip) {
+    const int GWL_STYLE = -16;
+    const int WS_CLIPCHILDREN = 0x02000000;
+    int style = GetWindowLong(hwnd, GWL_STYLE);
+    if (clip) style |= WS_CLIPCHILDREN;
+    else style &= ~WS_CLIPCHILDREN;
+    SetWindowLong(hwnd, GWL_STYLE, style);
+    SetWindowPos(hwnd, IntPtr.Zero, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020);
   }
 
   public static void Detach(IntPtr hwnd, IntPtr ownerKeep) {
@@ -280,14 +309,11 @@ function Invoke-FoxAction($cmd) {
     [void][FoxBoxNative]::ShowWindow($hwnd, 8)
     [void][FoxBoxNative]::SetForegroundWindow($hwnd)
   } elseif ($action -eq "place") {
-    if ($cmd.pid -and ([uint32]$cmd.pid -ne 0)) {
-      $top = [FoxBoxNative]::FindBestByPids(@([uint32]$cmd.pid))
-      if ($top -ne 0) {
-        $raw = $top
-        $hwnd = [IntPtr]$raw
-      }
-    }
     [FoxBoxNative]::EmbedAt($hwnd, [IntPtr]$owner, $x, $y, $w, $h)
+  } elseif ($action -eq "move") {
+    [FoxBoxNative]::MoveEmbedded($hwnd, [IntPtr]$owner, $x, $y, $w, $h)
+  } elseif ($action -eq "clip") {
+    [FoxBoxNative]::SetClipChildren($hwnd, [bool]$cmd.clip)
   }
 
   return $raw

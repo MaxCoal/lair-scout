@@ -3,13 +3,14 @@ import { createInterface } from 'node:readline'
 import { join } from 'node:path'
 
 export type Win32Opts = {
-  action: 'find' | 'hide' | 'show' | 'place'
+  action: 'find' | 'hide' | 'show' | 'place' | 'move' | 'clip'
   title?: string
   hwnd?: number
   pid?: number
   owner?: number
   topmost?: boolean
   taskbar?: boolean
+  clip?: boolean
   x?: number
   y?: number
   width?: number
@@ -47,6 +48,7 @@ class Win32Host {
           owner: opts.owner ?? 0,
           topmost: Boolean(opts.topmost),
           taskbar: Boolean(opts.taskbar),
+          clip: Boolean(opts.clip),
           title: opts.title ?? '',
           x: Math.round(opts.x ?? 0),
           y: Math.round(opts.y ?? 0),
@@ -134,6 +136,17 @@ export async function placeFoxWindow(
   rect: { x: number; y: number; width: number; height: number }
 ): Promise<number> {
   return controlWindow({ action: 'place', taskbar: false, topmost: false, ...opts, ...rect })
+}
+
+export async function moveFoxWindow(
+  opts: { pid?: number; hwnd?: number; title?: string; owner?: number },
+  rect: { x: number; y: number; width: number; height: number }
+): Promise<number> {
+  return controlWindow({ action: 'move', taskbar: false, topmost: false, ...opts, ...rect })
+}
+
+export async function setClipChildren(hwnd: number, clip: boolean): Promise<number> {
+  return controlWindow({ action: 'clip', hwnd, clip })
 }
 
 export function stopWin32Host(): void {

@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { join } from 'node:path'
 import type { InstanceSnapshot, RamSnapshot } from '@shared/types'
-import { findFoxWindow, hideFoxWindow, placeFoxWindow, showWindow, stopWin32Host } from './win32'
+import { findFoxWindow, hideFoxWindow, moveFoxWindow, placeFoxWindow, setClipChildren, showWindow, stopWin32Host } from './win32'
 import { readRam } from './memory'
 
 const DEFAULT_COUNT = 2
@@ -16,6 +16,7 @@ type WindowState = {
   profileDir: string
   poppedOut: boolean
   interacting: boolean
+  lastPhys?: { x: number; y: number; width: number; height: number }
 }
 
 type StageRect = { x: number; y: number; width: number; height: number }
@@ -180,10 +181,19 @@ export class FirefoxManager {
 
   async interact(id: string, rect: StageRect): Promise<void> {
     this.stageRect = rect
+    const state = this.windows.get(id)
+    if (!state) return
+    const already = state.interacting
+    if (already) {
+      const moved = await this.placeState(id, state, rect, 'move')
+      if (moved) state.hwnd = moved
+      return
+    }
     this.fire('setPaused', { foxId: id, paused: true })
     for (const [otherId, other] of this.windows) {
       if (otherId !== id && other.interacting) {
         other.interacting = false
+        other.lastPhys = undefined
         await hideFoxWindow({
           pid: other.pid,
           hwnd: other.hwnd,
@@ -192,11 +202,10 @@ export class FirefoxManager {
         })
       }
     }
-    const state = this.windows.get(id)
-    if (!state) return
     state.interacting = true
     state.poppedOut = false
-    const placed = await this.placeState(id, state, rect)
+    await setClipChildren(this.ownerHwnd(), true)
+    const placed = await this.placeState(id, state, rect, 'place')
     if (placed) state.hwnd = placed
     this.broadcast()
   }
@@ -205,6 +214,7 @@ export class FirefoxManager {
     const state = this.windows.get(id)
     if (!state) return
     state.interacting = false
+    state.lastPhys = undefined
     state.hwnd = await hideFoxWindow({
       pid: state.pid,
       hwnd: state.hwnd,
@@ -212,6 +222,9 @@ export class FirefoxManager {
       owner: this.ownerHwnd()
     })
     this.fire('setPaused', { foxId: id, paused: false })
+    if (![...this.windows.values()].some((item) => item.interacting)) {
+      await setClipChildren(this.ownerHwnd(), false)
+    }
     this.broadcast()
   }
 
@@ -219,11 +232,15 @@ export class FirefoxManager {
     const state = this.windows.get(id)
     if (!state) return
     state.interacting = false
+    state.lastPhys = undefined
     const hwnd = await findFoxWindow({ pid: state.pid, hwnd: state.hwnd, title: `FoxBox-${id}` })
     if (hwnd) state.hwnd = hwnd
     if (state.hwnd) await showWindow(state.hwnd)
     state.poppedOut = true
     this.fire('setPaused', { foxId: id, paused: true })
+    if (![...this.windows.values()].some((item) => item.interacting)) {
+      await setClipChildren(this.ownerHwnd(), false)
+    }
     this.broadcast()
   }
 
@@ -232,6 +249,7 @@ export class FirefoxManager {
     if (!state) return
     state.interacting = false
     state.poppedOut = false
+    state.lastPhys = undefined
     state.hwnd = await hideFoxWindow({
       pid: state.pid,
       hwnd: state.hwnd,
@@ -239,6 +257,9 @@ export class FirefoxManager {
       owner: this.ownerHwnd()
     })
     this.fire('setPaused', { foxId: id, paused: false })
+    if (![...this.windows.values()].some((item) => item.interacting)) {
+      await setClipChildren(this.ownerHwnd(), false)
+    }
     this.broadcast()
   }
 
@@ -257,7 +278,12 @@ export class FirefoxManager {
     stopWin32Host()
   }
 
-  private async placeState(id: string, state: WindowState, rect: StageRect): Promise<number> {
+  private async placeState(
+    id: string,
+    state: WindowState,
+    rect: StageRect,
+    mode: 'place' | 'move'
+  ): Promise<number> {
     if (!this.window || this.window.isDestroyed()) return 0
     const content = this.window.getContentBounds()
     const dip = {
@@ -267,10 +293,26 @@ export class FirefoxManager {
       height: Math.max(80, rect.height)
     }
     const phys = screen.dipToScreenRect(this.window, dip)
-    return placeFoxWindow(
-      { pid: state.pid, hwnd: state.hwnd, title: `FoxBox-${id}`, owner: this.ownerHwnd() },
-      phys
-    )
+    const next = {
+      x: Math.round(phys.x),
+      y: Math.round(phys.y),
+      width: Math.round(phys.width),
+      height: Math.round(phys.height)
+    }
+    if (
+      mode === 'move' &&
+      state.lastPhys &&
+      Math.abs(state.lastPhys.x - next.x) < 2 &&
+      Math.abs(state.lastPhys.y - next.y) < 2 &&
+      Math.abs(state.lastPhys.width - next.width) < 2 &&
+      Math.abs(state.lastPhys.height - next.height) < 2
+    ) {
+      return state.hwnd
+    }
+    const opts = { pid: state.pid, hwnd: state.hwnd, title: `FoxBox-${id}`, owner: this.ownerHwnd() }
+    const hwnd = mode === 'place' ? await placeFoxWindow(opts, next) : await moveFoxWindow(opts, next)
+    if (hwnd) state.lastPhys = next
+    return hwnd
   }
 
   private ownerHwnd(): number {
@@ -283,7 +325,7 @@ export class FirefoxManager {
     if (!this.stageRect) return
     for (const [id, state] of this.windows) {
       if (!state.interacting) continue
-      const hwnd = await this.placeState(id, state, this.stageRect)
+      const hwnd = await this.placeState(id, state, this.stageRect, 'move')
       if (hwnd) state.hwnd = hwnd
     }
   }
@@ -314,7 +356,7 @@ export class FirefoxManager {
     this.interactTimer = setInterval(() => {
       if (this.shuttingDown) return
       void this.relayoutInteract()
-    }, 80)
+    }, 250)
   }
 
   private armDockTimer(): void {

@@ -22,16 +22,30 @@ export default function FocusView({ fox, driveAll, fleetCount, live, onBack, onR
 
   useEffect(() => {
     if (!live) return undefined
+    const last = { x: 0, y: 0, width: 0, height: 0 }
     const report = (): void => {
       const el = stageRef.current
       if (!el) return
       const rect = el.getBoundingClientRect()
-      void window.foxbox.interact(fox.id, {
-        x: rect.x,
-        y: rect.y,
-        width: rect.width,
-        height: rect.height
-      })
+      const next = {
+        x: Math.round(rect.x),
+        y: Math.round(rect.y),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height)
+      }
+      if (
+        next.x === last.x &&
+        next.y === last.y &&
+        next.width === last.width &&
+        next.height === last.height
+      ) {
+        return
+      }
+      last.x = next.x
+      last.y = next.y
+      last.width = next.width
+      last.height = next.height
+      void window.foxbox.interact(fox.id, next)
     }
     report()
     requestAnimationFrame(() => requestAnimationFrame(report))
