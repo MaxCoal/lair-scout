@@ -59,6 +59,10 @@ export type RamSnapshot = {
   usedLabel: string
   totalLabel: string
   foxboxLabel: string
+  cpuPercent: number
+  cpuFoxboxPercent: number
+  gpuPercent: number | null
+  gpuName: string
 }
 
 export type ShippingProfile = {

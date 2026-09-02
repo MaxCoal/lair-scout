@@ -107,7 +107,15 @@ input {
 .top-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 8px;
+}
+
+.meters {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .stepper {
@@ -144,6 +152,11 @@ input {
   display: flex;
   align-items: center;
   padding: 0 10px;
+}
+
+.ram-meter.cpu,
+.ram-meter.gpu {
+  min-width: 92px;
 }
 
 .ram-bar {

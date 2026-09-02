@@ -2,6 +2,12 @@ import { useEffect, useRef, useState, type FormEvent } from 'react'
 import type { RamSnapshot } from '@shared/types'
 import { foxSortLabel, type FoxSort } from '../sortFoxes'
 
+function tone(percent: number): string {
+  if (percent >= 90) return 'critical'
+  if (percent >= 75) return 'warn'
+  return ''
+}
+
 type Props = {
   url: string
   count: number
@@ -116,14 +122,34 @@ export default function FleetBar({
           </button>
         </form>
         {ram ? (
-          <div
-            className={`ram-meter ${ram.percent >= 90 ? 'critical' : ram.percent >= 75 ? 'warn' : ''}`}
-            title={`System ${ram.usedLabel} of ${ram.totalLabel} in use. FoxBox is using ${ram.foxboxLabel}.`}
-          >
-            <div className="ram-bar" style={{ width: `${Math.min(100, ram.percent)}%` }} />
-            <span className="mono">
-              RAM {ram.usedLabel} / {ram.totalLabel} · FoxBox {ram.foxboxLabel}
-            </span>
+          <div className="meters">
+            <div
+              className={`ram-meter cpu ${tone(ram.cpuPercent)}`}
+              title={`System CPU ${ram.cpuPercent}%. FoxBox is using about ${ram.cpuFoxboxPercent}% of all cores.`}
+            >
+              <div className="ram-bar" style={{ width: `${Math.min(100, ram.cpuPercent)}%` }} />
+              <span className="mono">CPU {ram.cpuPercent}%</span>
+            </div>
+            <div
+              className={`ram-meter gpu ${ram.gpuPercent == null ? '' : tone(ram.gpuPercent)}`}
+              title={
+                ram.gpuName
+                  ? `${ram.gpuName}: Chromium is using hardware acceleration${ram.gpuPercent == null ? '' : ` (${ram.gpuPercent}%)`}`
+                  : 'Chromium is using GPU hardware acceleration for page rendering.'
+              }
+            >
+              <div className="ram-bar" style={{ width: `${Math.min(100, ram.gpuPercent ?? 0)}%` }} />
+              <span className="mono">{ram.gpuPercent == null ? 'GPU …' : `GPU ${ram.gpuPercent}%`}</span>
+            </div>
+            <div
+              className={`ram-meter ${tone(ram.percent)}`}
+              title={`System ${ram.usedLabel} of ${ram.totalLabel} in use. FoxBox is using ${ram.foxboxLabel}.`}
+            >
+              <div className="ram-bar" style={{ width: `${Math.min(100, ram.percent)}%` }} />
+              <span className="mono">
+                RAM {ram.usedLabel} / {ram.totalLabel} · FoxBox {ram.foxboxLabel}
+              </span>
+            </div>
           </div>
         ) : null}
         <button className={`btn ghost ${driveAll ? 'active' : ''}`} type="button" onClick={onToggleDriveAll}>

@@ -455,6 +455,11 @@ async function spawnFox(foxId, profileDir) {
         '--disable-backgrounding-occluded-windows',
         '--disable-renderer-backgrounding',
         '--disable-background-timer-throttling',
+        '--ignore-gpu-blocklist',
+        '--enable-gpu',
+        '--enable-gpu-rasterization',
+        '--enable-zero-copy',
+        '--use-angle=d3d11',
         '--app-user-model-id=com.foxbox.app'
       ]
     })
@@ -899,6 +904,6 @@ rl.on('line', (line) => {
   })
 })
 
-killStrayPlaywrightChromium()
+if (process.env.FOXBOX_KILL_STRAY === '1') killStrayPlaywrightChromium()
 scheduleTick()
 send({ type: 'event', event: 'ready', payload: { executable: chromium.executablePath() } })

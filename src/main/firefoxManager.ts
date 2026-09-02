@@ -22,12 +22,25 @@ type WindowState = {
 
 type StageRect = { x: number; y: number; width: number; height: number }
 
+type WorkerHandle = {
+  foxId: string
+  child: ChildProcessWithoutNullStreams
+  ready: Promise<void>
+  markReady: () => void
+}
+
+type Pending = {
+  foxId: string
+  resolve: (value: unknown) => void
+  reject: (error: Error) => void
+}
+
 export class FirefoxManager {
   private window: BrowserWindow | null = null
-  private worker: ChildProcessWithoutNullStreams | null = null
+  private workers = new Map<string, WorkerHandle>()
   private nextId = 1
   private nextRequest = 1
-  private pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>()
+  private pending = new Map<number, Pending>()
   private snapshots: InstanceSnapshot[] = []
   private windows = new Map<string, WindowState>()
   private muted = false
@@ -37,18 +50,18 @@ export class FirefoxManager {
   private interactTimer: NodeJS.Timeout | null = null
   private ramTimer: NodeJS.Timeout | null = null
   private stageRect: StageRect | null = null
-  private ready: Promise<void>
-  private markReady: () => void = () => undefined
+  private strayDone: Promise<void>
+  private markStrayDone: () => void = () => undefined
+  private strayState: 'pending' | 'cleaning' | 'done' = 'pending'
 
   constructor() {
-    this.ready = new Promise((resolve) => {
-      this.markReady = resolve
+    this.strayDone = new Promise((resolve) => {
+      this.markStrayDone = resolve
     })
   }
 
   attach(window: BrowserWindow): void {
     this.window = window
-    this.ensureWorker()
     this.armDockTimer()
     this.armInteractTimer()
     this.armRamTimer()
@@ -75,8 +88,11 @@ export class FirefoxManager {
   }
 
   private async pushProfile(): Promise<void> {
-    if (!this.worker) return
-    await this.call('setProfile', { profile: this.shipping }).catch(() => undefined)
+    await Promise.all(
+      [...this.workers.keys()].map((id) =>
+        this.callOn(id, 'setProfile', { profile: this.shipping }).catch(() => undefined)
+      )
+    )
   }
 
   setMuted(muted: boolean): void {
@@ -84,7 +100,7 @@ export class FirefoxManager {
   }
 
   async setFocused(id: string | null): Promise<void> {
-    await this.call('setFocused', { foxId: id })
+    this.forEachWorker((handle) => this.write(handle, { requestId: 0, cmd: 'setFocused', foxId: id }))
   }
 
   list(): InstanceSnapshot[] {
@@ -92,34 +108,26 @@ export class FirefoxManager {
   }
 
   async startDefaultFleet(): Promise<void> {
-    await Promise.race([
-      this.ready,
-      sleep(20000).then(() => {
-        throw new Error('Chromium worker did not start. Is Node.js on PATH?')
-      })
-    ])
-    for (let i = 0; i < DEFAULT_COUNT; i += 1) {
-      await this.spawn()
-    }
+    await Promise.all(Array.from({ length: DEFAULT_COUNT }, () => this.spawn()))
   }
 
   async spawn(): Promise<string> {
-    await this.ready
     return this.launch(String(this.nextId++))
   }
 
   async restart(id: string): Promise<void> {
-    await this.ready
     const snap = this.snapshots.find((fox) => fox.id === id)
     const url = snap?.url && /^https?:/i.test(snap.url) ? snap.url : undefined
     const state = this.windows.get(id)
     if (state?.interacting) {
       state.interacting = false
-      this.fire('setPaused', { foxId: id, paused: false })
+      this.fireOn(id, 'setPaused', { foxId: id, paused: false })
     }
     if (this.windows.has(id)) {
-      await this.call('kill', { foxId: id }).catch(() => undefined)
+      await this.callOn(id, 'kill', { foxId: id }).catch(() => undefined)
+      this.disposeWorker(id)
       this.windows.delete(id)
+      this.rebuildSnapshots()
       this.broadcast()
     }
     await this.launch(id)
@@ -127,9 +135,18 @@ export class FirefoxManager {
   }
 
   private async launch(id: string): Promise<string> {
+    const handle = await this.bootWorker(id)
+    await Promise.race([
+      handle.ready,
+      sleep(20000).then(() => {
+        throw new Error('Chromium worker did not start. Is Node.js on PATH?')
+      })
+    ])
     const profileDir = join(app.getPath('userData'), 'foxes', `${id}-${Date.now()}`)
     this.windows.set(id, { hwnd: 0, pid: 0, profileDir, poppedOut: false, interacting: false })
-    const result = (await this.call('spawn', { foxId: id, profileDir }, 120000)) as { pid?: number }
+    this.rebuildSnapshots()
+    this.broadcast()
+    const result = (await this.callOn(id, 'spawn', { foxId: id, profileDir }, 120000)) as { pid?: number }
     const state = this.windows.get(id)
     if (state && result?.pid) state.pid = result.pid
     if (state) {
@@ -146,36 +163,41 @@ export class FirefoxManager {
 
   async scaleTo(target: number): Promise<void> {
     const n = Math.max(0, Math.min(MAX_FLEET, Math.floor(Number(target) || 0)))
-    while (this.windows.size < n) {
-      await this.spawn()
+    const adds: Promise<string>[] = []
+    while (this.windows.size + adds.length < n) {
+      adds.push(this.spawn())
     }
-    while (this.windows.size > n) {
-      const last = [...this.windows.keys()].at(-1)
-      if (!last) break
-      await this.kill(last)
-    }
+    if (adds.length) await Promise.all(adds)
+    const extra = [...this.windows.keys()].slice(n)
+    if (extra.length) await Promise.all(extra.map((id) => this.kill(id)))
   }
 
   async kill(id: string): Promise<void> {
-    await this.call('kill', { foxId: id })
+    await this.callOn(id, 'kill', { foxId: id }).catch(() => undefined)
+    this.disposeWorker(id)
     this.windows.delete(id)
+    this.rebuildSnapshots()
     this.broadcast()
   }
 
   async gotoAll(url: string): Promise<void> {
-    await this.call('gotoAll', { url })
+    await Promise.allSettled(
+      [...this.workers.keys()].map((id) => this.callOn(id, 'goto', { foxId: id, url }))
+    )
   }
 
   async rushCheckout(): Promise<void> {
-    await this.call('rushCheckout', {}, 150000)
+    await Promise.allSettled(
+      [...this.workers.keys()].map((id) => this.callOn(id, 'rushCheckout', {}, 150000))
+    )
   }
 
   async gotoOne(id: string, url: string): Promise<void> {
-    await this.call('goto', { foxId: id, url })
+    await this.callOn(id, 'goto', { foxId: id, url })
   }
 
   async reload(id: string): Promise<void> {
-    await this.call('reload', { foxId: id })
+    await this.callOn(id, 'reload', { foxId: id })
   }
 
   click(
@@ -185,19 +207,19 @@ export class FirefoxManager {
     button: 'left' | 'right' | 'middle' = 'left',
     double = false
   ): void {
-    this.fire('click', { foxId: id, nx, ny, button, double })
+    this.input(id, 'click', { nx, ny, button, double })
   }
 
   move(id: string, nx: number, ny: number): void {
-    this.fire('move', { foxId: id, nx, ny })
+    this.input(id, 'move', { nx, ny })
   }
 
   key(id: string, key: string, type: 'down' | 'up' | 'press'): void {
-    this.fire('key', { foxId: id, key, keyType: type })
+    this.input(id, 'key', { key, keyType: type })
   }
 
   scroll(id: string, dx: number, dy: number): void {
-    this.fire('scroll', { foxId: id, dx, dy })
+    this.input(id, 'scroll', { dx, dy })
   }
 
   async interact(id: string, rect: StageRect): Promise<void> {
@@ -210,11 +232,12 @@ export class FirefoxManager {
       if (moved) state.hwnd = moved
       return
     }
-    this.fire('setPaused', { foxId: id, paused: true })
+    this.fireOn(id, 'setPaused', { foxId: id, paused: true })
     for (const [otherId, other] of this.windows) {
       if (otherId !== id && other.interacting) {
         other.interacting = false
         other.lastPhys = undefined
+        this.fireOn(otherId, 'setPaused', { foxId: otherId, paused: false })
         await hideFoxWindow({
           pid: other.pid,
           hwnd: other.hwnd,
@@ -242,7 +265,7 @@ export class FirefoxManager {
       title: `FoxBox-${id}`,
       owner: this.ownerHwnd()
     })
-    this.fire('setPaused', { foxId: id, paused: false })
+    this.fireOn(id, 'setPaused', { foxId: id, paused: false })
     if (![...this.windows.values()].some((item) => item.interacting)) {
       await setClipChildren(this.ownerHwnd(), false)
     }
@@ -258,7 +281,7 @@ export class FirefoxManager {
     if (hwnd) state.hwnd = hwnd
     if (state.hwnd) await showWindow(state.hwnd)
     state.poppedOut = true
-    this.fire('setPaused', { foxId: id, paused: true })
+    this.fireOn(id, 'setPaused', { foxId: id, paused: true })
     if (![...this.windows.values()].some((item) => item.interacting)) {
       await setClipChildren(this.ownerHwnd(), false)
     }
@@ -277,7 +300,7 @@ export class FirefoxManager {
       title: `FoxBox-${id}`,
       owner: this.ownerHwnd()
     })
-    this.fire('setPaused', { foxId: id, paused: false })
+    this.fireOn(id, 'setPaused', { foxId: id, paused: false })
     if (![...this.windows.values()].some((item) => item.interacting)) {
       await setClipChildren(this.ownerHwnd(), false)
     }
@@ -289,13 +312,9 @@ export class FirefoxManager {
     if (this.dockTimer) clearInterval(this.dockTimer)
     if (this.interactTimer) clearInterval(this.interactTimer)
     if (this.ramTimer) clearInterval(this.ramTimer)
-    try {
-      await this.call('shutdown', {})
-    } catch {
-      /* worker may already be gone */
-    }
-    this.worker?.kill()
-    this.worker = null
+    const ids = [...this.workers.keys()]
+    await Promise.allSettled(ids.map((id) => this.callOn(id, 'shutdown', {}).catch(() => undefined)))
+    for (const id of ids) this.disposeWorker(id)
     stopWin32Host()
   }
 
@@ -355,7 +374,8 @@ export class FirefoxManager {
     if (this.ramTimer) return
     const tick = (): void => {
       if (this.shuttingDown) return
-      const pids = [process.pid, this.worker?.pid ?? 0]
+      const pids = [process.pid]
+      for (const handle of this.workers.values()) pids.push(handle.child.pid ?? 0)
       for (const state of this.windows.values()) pids.push(state.pid)
       void readRam(pids).then((ram) => {
         if (this.shuttingDown) return
@@ -398,38 +418,76 @@ export class FirefoxManager {
     }, 2000)
   }
 
-  private ensureWorker(): void {
-    if (this.worker) return
+  private async bootWorker(id: string): Promise<WorkerHandle> {
+    if (this.strayState === 'cleaning') await this.strayDone
+    const killStray = this.strayState === 'pending'
+    if (killStray) this.strayState = 'cleaning'
+    const existing = this.workers.get(id)
+    if (existing) return existing
+
     const workerPath = join(__dirname, 'foxWorker.cjs')
     const nodePath = resolveNode()
     const env = { ...process.env }
     delete env.PLAYWRIGHT_BROWSERS_PATH
     delete env.ELECTRON_RUN_AS_NODE
+    if (killStray) env.FOXBOX_KILL_STRAY = '1'
+    else delete env.FOXBOX_KILL_STRAY
+
+    let settled = false
+    let markReady: () => void = () => undefined
+    const ready = new Promise<void>((resolve) => {
+      markReady = () => {
+        if (settled) return
+        settled = true
+        resolve()
+      }
+    })
+
     const child = spawn(nodePath, [workerPath], {
       stdio: ['pipe', 'pipe', 'pipe'],
       env,
       windowsHide: true
     })
-    this.worker = child
+    const handle: WorkerHandle = { foxId: id, child, ready, markReady }
+    this.workers.set(id, handle)
 
     child.stderr.on('data', (chunk) => {
-      console.error('[fox-worker]', String(chunk))
+      console.error(`[fox-worker ${id}]`, String(chunk))
     })
 
     const rl = createInterface({ input: child.stdout })
-    rl.on('line', (line) => this.onLine(line))
+    rl.on('line', (line) => this.onLine(id, line))
     child.on('exit', (code) => {
-      for (const [id, pending] of this.pending) {
-        pending.reject(new Error(`Chromium worker exited (${code ?? 'unknown'})`))
-        this.pending.delete(id)
+      handle.markReady()
+      if (this.strayState === 'cleaning') {
+        this.strayState = 'done'
+        this.markStrayDone()
       }
-      if (!this.shuttingDown) {
-        console.error('Chromium worker exited unexpectedly', code)
+      for (const [requestId, pending] of this.pending) {
+        if (pending.foxId !== id) continue
+        pending.reject(new Error(`Chromium worker exited (${code ?? 'unknown'})`))
+        this.pending.delete(requestId)
+      }
+      if (this.workers.get(id) === handle) this.workers.delete(id)
+      if (!this.shuttingDown && this.windows.has(id)) {
+        console.error(`Chromium worker for Fox ${id} exited unexpectedly`, code)
       }
     })
+    return handle
   }
 
-  private onLine(line: string): void {
+  private disposeWorker(id: string): void {
+    const handle = this.workers.get(id)
+    if (!handle) return
+    this.workers.delete(id)
+    try {
+      handle.child.kill()
+    } catch {
+      /* gone */
+    }
+  }
+
+  private onLine(foxId: string, line: string): void {
     if (!line.trim()) return
     let message: {
       type: string
@@ -443,7 +501,7 @@ export class FirefoxManager {
     try {
       message = JSON.parse(line)
     } catch {
-      console.error('[fox-worker] bad line', line)
+      console.error(`[fox-worker ${foxId}] bad line`, line)
       return
     }
 
@@ -474,22 +532,19 @@ export class FirefoxManager {
     }
 
     if (message.type === 'event' && message.event === 'ready') {
-      this.markReady()
-      void this.pushProfile()
+      const handle = this.workers.get(foxId)
+      handle?.markReady()
+      if (this.strayState === 'cleaning') {
+        this.strayState = 'done'
+        this.markStrayDone()
+      }
+      void this.callOn(foxId, 'setProfile', { profile: this.shipping }).catch(() => undefined)
       return
     }
 
     if (message.type === 'event' && message.event === 'update') {
       const incoming = (message.payload as InstanceSnapshot[]) || []
-      this.snapshots = incoming.map((fox) => {
-        const win = this.windows.get(fox.id)
-        return {
-          ...fox,
-          statusLabel: fox.statusLabel || '',
-          poppedOut: win?.poppedOut ?? false,
-          interacting: win?.interacting ?? false
-        }
-      })
+      this.rebuildSnapshots(incoming)
       this.broadcast()
       return
     }
@@ -507,6 +562,38 @@ export class FirefoxManager {
     }
   }
 
+  private decorate(fox: InstanceSnapshot): InstanceSnapshot {
+    const win = this.windows.get(fox.id)
+    return {
+      ...fox,
+      statusLabel: fox.statusLabel || '',
+      poppedOut: win?.poppedOut ?? fox.poppedOut ?? false,
+      interacting: win?.interacting ?? fox.interacting ?? false
+    }
+  }
+
+  private placeholder(id: string): InstanceSnapshot {
+    return {
+      id,
+      url: '',
+      host: '',
+      title: `Fox ${id}`,
+      status: 'loading',
+      statusLabel: 'Starting…',
+      interacting: false,
+      poppedOut: false,
+      admittedFlash: false
+    }
+  }
+
+  private rebuildSnapshots(incoming?: InstanceSnapshot[]): void {
+    const byId = new Map(this.snapshots.map((fox) => [fox.id, fox]))
+    if (incoming) {
+      for (const fox of incoming) byId.set(fox.id, this.decorate(fox))
+    }
+    this.snapshots = [...this.windows.keys()].map((id) => this.decorate(byId.get(id) ?? this.placeholder(id)))
+  }
+
   private emitAlert(channel: string, id: string, body: string): void {
     for (const win of BrowserWindow.getAllWindows()) {
       if (!win.isDestroyed()) win.webContents.send(channel, id)
@@ -516,17 +603,31 @@ export class FirefoxManager {
     }
   }
 
-  private fire(cmd: string, payload: Record<string, unknown>): void {
-    this.ensureWorker()
-    this.worker?.stdin.write(`${JSON.stringify({ requestId: 0, cmd, ...payload })}\n`)
+  private forEachWorker(fn: (handle: WorkerHandle, foxId: string) => void): void {
+    for (const [foxId, handle] of this.workers) fn(handle, foxId)
   }
 
-  private call(cmd: string, payload: Record<string, unknown>, timeoutMs = 60000): Promise<unknown> {
-    this.ensureWorker()
+  private input(id: string, cmd: string, payload: Record<string, unknown>): void {
+    if (id === '*') {
+      this.forEachWorker((handle, foxId) => this.write(handle, { requestId: 0, cmd, foxId, ...payload }))
+      return
+    }
+    this.fireOn(id, cmd, { foxId: id, ...payload })
+  }
+
+  private fireOn(foxId: string, cmd: string, payload: Record<string, unknown>): void {
+    const handle = this.workers.get(foxId)
+    if (!handle) return
+    this.write(handle, { requestId: 0, cmd, ...payload })
+  }
+
+  private callOn(foxId: string, cmd: string, payload: Record<string, unknown>, timeoutMs = 60000): Promise<unknown> {
+    const handle = this.workers.get(foxId)
+    if (!handle) return Promise.reject(new Error(`No worker for Fox ${foxId}`))
     const requestId = this.nextRequest++
     return new Promise((resolve, reject) => {
-      this.pending.set(requestId, { resolve, reject })
-      this.worker?.stdin.write(`${JSON.stringify({ requestId, cmd, ...payload })}\n`)
+      this.pending.set(requestId, { foxId, resolve, reject })
+      this.write(handle, { requestId, cmd, foxId, ...payload })
       setTimeout(() => {
         if (this.pending.has(requestId)) {
           this.pending.delete(requestId)
@@ -534,6 +635,10 @@ export class FirefoxManager {
         }
       }, timeoutMs)
     })
+  }
+
+  private write(handle: WorkerHandle, message: Record<string, unknown>): void {
+    handle.child.stdin?.write(`${JSON.stringify(message)}\n`)
   }
 
   private broadcast(): void {
