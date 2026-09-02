@@ -19,6 +19,7 @@ const IN_QUEUE_COPY =
   /you are (now )?in line|you're in line|you are in the queue|people ahead of you|visitors ahead of you|your estimated wait|estimated wait time|place in line|queue number/i
 const YOUR_TURN = /it['’]?s your turn|you can now enter|you(?:'| a)?re next|you have been redirected/i
 const STOCK_COPY = /sold out|out of stock/i
+const LONG_WAIT = /more th[ae]n an hour/i
 
 /** @type {Map<string, any>} */
 const instances = new Map()
@@ -313,6 +314,17 @@ async function scrapeMessageDom(page) {
   return null
 }
 
+async function readPageText(page) {
+  const chunks = []
+  for (const frame of page.frames()) {
+    const frameUrl = frame.url()
+    if (/youtube|google|doubleclick|facebook/i.test(frameUrl)) continue
+    const text = await frame.locator('body').innerText({ timeout: 600 }).catch(() => '')
+    if (text) chunks.push(text)
+  }
+  return chunks.join('\n')
+}
+
 async function inspectPage(page, previous, wasInQueue) {
   const url = page.url()
   const host = hostOf(url)
@@ -322,50 +334,46 @@ async function inspectPage(page, previous, wasInQueue) {
     return { status: 'idle', host, url, title, statusLabel: 'Idle' }
   }
 
-  let extracted
+  let extracted = mergeExtract([])
   try {
     const parts = []
     for (const frame of page.frames()) {
       try {
         parts.push(await extractFrame(frame))
       } catch {
-        /* cross-origin */
+        /* ignore */
       }
     }
     extracted = mergeExtract(parts)
-    if (!extracted.messageText) {
-      const fromInner = noticeFromInner(extracted.inner)
-      if (fromInner) {
-        extracted.messageHeader = fromInner.messageHeader
-        extracted.messageTime = fromInner.messageTime
-        extracted.messageText = fromInner.messageText
-      }
-    }
-    if (!extracted.messageText) {
-      const fromDom = await scrapeMessageDom(page)
-      if (fromDom?.messageText) {
-        extracted.messageId = fromDom.messageId || extracted.messageId
-        extracted.messageHeader = fromDom.messageHeader || extracted.messageHeader
-        extracted.messageTime = fromDom.messageTime || extracted.messageTime
-        extracted.messageText = fromDom.messageText
-      }
-    }
   } catch {
-    return {
-      status: previous === 'loading' ? 'loading' : 'error',
-      host,
-      url,
-      title,
-      statusLabel: previous === 'loading' ? 'Loading' : 'Error'
+    /* use page text */
+  }
+
+  const visible = await readPageText(page)
+  const inner = `${extracted.inner || ''}\n${visible}`
+  if (!extracted.messageText) {
+    const fromInner = noticeFromInner(inner)
+    if (fromInner) {
+      extracted.messageHeader = fromInner.messageHeader
+      extracted.messageTime = fromInner.messageTime
+      extracted.messageText = fromInner.messageText
+    }
+  }
+  if (!extracted.messageText) {
+    const fromDom = await scrapeMessageDom(page).catch(() => null)
+    if (fromDom?.messageText) {
+      extracted.messageId = fromDom.messageId || extracted.messageId
+      extracted.messageHeader = fromDom.messageHeader || extracted.messageHeader
+      extracted.messageTime = fromDom.messageTime || extracted.messageTime
+      extracted.messageText = fromDom.messageText
     }
   }
 
-  const inner = extracted.inner
   const pageId = String(extracted.pageId || '').toLowerCase()
   const bodyClass = String(extracted.bodyClass || '').toLowerCase()
-  const onQueueHost = QUEUE_HOST.test(host)
+  const onQueueHost = QUEUE_HOST.test(host) || isOnQueue(url)
   const hasToken = /queueittoken=/i.test(url)
-  const labeledWait = String(inner).match(/estimated wait(?: time)?(?: is)?:\s*([^\n\r]+)/i)
+  const labeledWait = inner.match(/estimated wait(?: time)?(?: is)?:\s*([^\n\r]+)/i)
   const waitTime =
     formatWait(extracted.waitTime) ||
     formatWait(labeledWait?.[1] || '') ||
@@ -373,9 +381,11 @@ async function inspectPage(page, previous, wasInQueue) {
   const stillInQueue =
     Boolean(waitTime) ||
     IN_QUEUE_COPY.test(inner) ||
+    /secret lair lounge/i.test(inner) && /estimated wait/i.test(inner) ||
     pageId === 'queue' ||
     bodyClass.split(/\s+/).includes('queue') ||
-    extracted.queueState === 2
+    extracted.queueState === 2 ||
+    onQueueHost
   const yourTurn = YOUR_TURN.test(inner) && !stillInQueue
 
   let status
@@ -391,8 +401,6 @@ async function inspectPage(page, previous, wasInQueue) {
     extracted.queueState === 1 ||
     PREQUEUE_COPY.test(inner)
   ) {
-    status = 'waiting_for_queue'
-  } else if (onQueueHost && extracted.hasQueueUi) {
     status = 'waiting_for_queue'
   } else if (wasInQueue || (hasToken && !onQueueHost)) {
     status = 'admitted'
@@ -750,8 +758,8 @@ async function inspectFox(fox) {
       fox.admittedFlashUntil = Date.now() + 12000
       send({ type: 'event', event: 'admitted', payload: fox.id })
     }
-  } catch {
-    /* keep last known status */
+  } catch (error) {
+    process.stderr.write(`[inspect ${fox.id}] ${error instanceof Error ? error.stack || error.message : error}\n`)
   }
 }
 
@@ -782,7 +790,7 @@ async function mapPool(items, limit, fn) {
 }
 
 async function tick() {
-  if (ticking || shuttingDown || spawning) {
+  if (ticking || shuttingDown) {
     scheduleTick()
     return
   }
@@ -966,8 +974,15 @@ async function rushCheckoutFox(fox) {
   setRushLabel(fox, 'Adding to cart…')
   try {
     await runRushCheckout(fox, page)
-    if (isOnQueue(page.url())) fox.statusLabel = 'Waiting in queue…'
-    else fox.statusLabel = 'In checkout / queue'
+    await inspectFox(fox)
+    if (fox.status === 'loading' || fox.status === 'idle' || /waiting in queue/i.test(fox.statusLabel || '')) {
+      if (isOnQueue(page.url())) {
+        fox.status = 'in_queue'
+        fox.statusLabel = statusLabel('in_queue', fox.waitTime)
+      } else {
+        fox.statusLabel = 'In checkout / queue'
+      }
+    }
   } catch (error) {
     fox.status = 'error'
     fox.error = error instanceof Error ? error.message : String(error)
