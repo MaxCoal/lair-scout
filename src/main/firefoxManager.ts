@@ -293,7 +293,7 @@ export class FirefoxManager {
     this.interactTimer = setInterval(() => {
       if (this.shuttingDown) return
       void this.relayoutInteract()
-    }, 250)
+    }, 80)
   }
 
   private armDockTimer(): void {

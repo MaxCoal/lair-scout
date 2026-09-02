@@ -33,6 +33,7 @@ export default function FocusView({ fox, driveAll, fleetCount, live, onBack }: P
       })
     }
     report()
+    requestAnimationFrame(() => requestAnimationFrame(report))
     const observer = new ResizeObserver(report)
     if (stageRef.current) observer.observe(stageRef.current)
     window.addEventListener('resize', report)

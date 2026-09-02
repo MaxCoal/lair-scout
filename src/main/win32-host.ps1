@@ -105,6 +105,23 @@ public static class FoxBoxNative {
     SetWindowLongPtr(hwnd, -8, owner);
   }
 
+  public static void SetFrame(IntPtr hwnd, bool chrome) {
+    const int GWL_STYLE = -16;
+    const int WS_CAPTION = 0x00C00000;
+    const int WS_THICKFRAME = 0x00040000;
+    const int WS_SYSMENU = 0x00080000;
+    const int WS_MINIMIZEBOX = 0x00020000;
+    const int WS_MAXIMIZEBOX = 0x00010000;
+    const int WS_BORDER = 0x00800000;
+    int style = GetWindowLong(hwnd, GWL_STYLE);
+    if (chrome) {
+      style |= WS_CAPTION | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX;
+    } else {
+      style &= ~(WS_CAPTION | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_BORDER);
+    }
+    SetWindowLong(hwnd, GWL_STYLE, style);
+  }
+
   public static void SetTaskbar(IntPtr hwnd, bool show) {
     const int GWL_EXSTYLE = -20;
     const int WS_EX_APPWINDOW = 0x00040000;
@@ -126,6 +143,7 @@ public static class FoxBoxNative {
 $SWP_NOZORDER = 0x0004
 $SWP_NOACTIVATE = 0x0010
 $SWP_SHOWWINDOW = 0x0040
+$SWP_FRAMECHANGED = 0x0020
 $HWND_TOPMOST = [IntPtr]::new(-1)
 $HWND_NOTOPMOST = [IntPtr]::new(-2)
 $HWND_TOP = [IntPtr]::Zero
@@ -185,20 +203,23 @@ function Invoke-FoxAction($cmd) {
     } elseif ($action -eq "hide") {
     [FoxBoxNative]::SetOwner($hwnd, [IntPtr]$owner)
     [FoxBoxNative]::SetTaskbar($hwnd, $false)
+    [FoxBoxNative]::SetFrame($hwnd, $true)
     [void][FoxBoxNative]::ShowWindow($hwnd, 8)
-    [void][FoxBoxNative]::SetWindowPos($hwnd, $HWND_NOTOPMOST, -32000, -32000, 1280, 720, ($SWP_NOACTIVATE -bor $SWP_SHOWWINDOW))
+    [void][FoxBoxNative]::SetWindowPos($hwnd, $HWND_NOTOPMOST, -32000, -32000, 1280, 720, ($SWP_NOACTIVATE -bor $SWP_SHOWWINDOW -bor $SWP_FRAMECHANGED))
   } elseif ($action -eq "show") {
     [FoxBoxNative]::SetOwner($hwnd, [IntPtr]::Zero)
+    [FoxBoxNative]::SetFrame($hwnd, $true)
     [FoxBoxNative]::SetTaskbar($hwnd, $true)
-    [void][FoxBoxNative]::SetWindowPos($hwnd, $HWND_NOTOPMOST, 80, 80, 1280, 720, $SWP_SHOWWINDOW)
-    [void][FoxBoxNative]::ShowWindow($hwnd, 9)
+    [void][FoxBoxNative]::SetWindowPos($hwnd, $HWND_NOTOPMOST, 80, 80, 1280, 720, ($SWP_SHOWWINDOW -bor $SWP_FRAMECHANGED))
+    [void][FoxBoxNative]::ShowWindow($hwnd, 8)
     [void][FoxBoxNative]::SetForegroundWindow($hwnd)
   } elseif ($action -eq "place") {
     [FoxBoxNative]::SetOwner($hwnd, [IntPtr]$owner)
-    [FoxBoxNative]::SetTaskbar($hwnd, $taskbar)
+    [FoxBoxNative]::SetTaskbar($hwnd, $false)
+    [FoxBoxNative]::SetFrame($hwnd, $false)
     $z = if ($topmost) { $HWND_TOPMOST } else { $HWND_TOP }
-    [void][FoxBoxNative]::ShowWindow($hwnd, 9)
-    [void][FoxBoxNative]::SetWindowPos($hwnd, $z, $x, $y, $w, $h, $SWP_SHOWWINDOW)
+    [void][FoxBoxNative]::ShowWindow($hwnd, 8)
+    [void][FoxBoxNative]::SetWindowPos($hwnd, $z, $x, $y, $w, $h, ($SWP_SHOWWINDOW -bor $SWP_FRAMECHANGED -bor $SWP_NOACTIVATE))
   }
 
   return $raw

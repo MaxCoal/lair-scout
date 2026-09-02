@@ -477,20 +477,8 @@ function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-async function clickFirstVisible(locator, timeoutMs) {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    const count = await locator.count().catch(() => 0)
-    for (let i = 0; i < count; i += 1) {
-      const el = locator.nth(i)
-      if (await el.isVisible().catch(() => false)) {
-        await el.click({ timeout: 4000 })
-        return true
-      }
-    }
-    await wait(200)
-  }
-  return false
+function isOnQueue(url) {
+  return /storequeue\.wizards\.com|queue-it\.net|queueittoken=/i.test(String(url || ''))
 }
 
 function setRushLabel(fox, label) {
@@ -501,93 +489,111 @@ function setRushLabel(fox, label) {
   emitUpdate()
 }
 
-async function runRushCheckout(fox, page) {
-  const url = page.url()
-  if (/storequeue\.wizards\.com|queue-it\.net/i.test(url)) return
-
-  const cookies = page.locator('#onetrust-accept-btn-handler, button:has-text("Accept All Cookies")')
-  if (await cookies.first().isVisible().catch(() => false)) {
-    await cookies.first().click().catch(() => undefined)
-    await wait(400)
+async function clickByScript(page, fn, timeoutMs) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const ok = await page.evaluate(fn).catch(() => false)
+    if (ok) return true
+    await wait(150)
   }
+  return false
+}
+
+function scriptClickAdd() {
+  const cookie = document.querySelector('#onetrust-accept-btn-handler')
+  if (cookie && cookie.offsetParent) cookie.click()
+  const nodes = [
+    ...document.querySelectorAll(
+      '#buy_button_container button[data-internal-id^="add-to-cart-"], button.buy-link[data-internal-id^="add-to-cart-"], button.buy-link'
+    )
+  ]
+  const extra = [...document.querySelectorAll('button, a.btn, a[role="button"]')]
+  const pool = [...nodes, ...extra]
+  const matches = pool.filter((el) => {
+    if (el.disabled) return false
+    const text = (el.innerText || el.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim()
+    if (!/preorder now|add to cart/i.test(text)) return false
+    const r = el.getBoundingClientRect()
+    const s = getComputedStyle(el)
+    return r.width > 24 && r.height > 16 && s.visibility !== 'hidden' && s.display !== 'none' && Number(s.opacity) > 0
+  })
+  if (!matches.length) return false
+  matches.sort((a, b) => b.getBoundingClientRect().width * b.getBoundingClientRect().height - a.getBoundingClientRect().width * a.getBoundingClientRect().height)
+  matches[0].click()
+  return true
+}
+
+function scriptClickProceed() {
+  const named = document.querySelector('[aria-label="Proceed to Cart"], #minicart button[sf-checkout], a.view-cart, a[sf-checkout].btn-primary')
+  const byText = [...document.querySelectorAll('button, a')].find((el) =>
+    /proceed to cart|view cart|^checkout$/i.test((el.innerText || '').replace(/\s+/g, ' ').trim())
+  )
+  const el = named || byText
+  if (!el) {
+    const mini = document.querySelector('#minicart-button')
+    if (mini) {
+      mini.click()
+      return false
+    }
+    return false
+  }
+  const r = el.getBoundingClientRect()
+  const s = getComputedStyle(el)
+  if (r.width < 8 || s.display === 'none' || s.visibility === 'hidden') return false
+  el.click()
+  return true
+}
+
+function scriptClickGuest() {
+  const el =
+    document.querySelector('#intersticial_checkout [aria-label="Continue as guest"], button[aria-label="Continue as guest"], button[ng-click="goCart()"]') ||
+    [...document.querySelectorAll('button')].find((btn) => /continue as guest/i.test((btn.innerText || '').replace(/\s+/g, ' ')))
+  if (!el) return false
+  const s = getComputedStyle(el)
+  if (s.display === 'none' || s.visibility === 'hidden') return false
+  el.click()
+  return true
+}
+
+async function runRushCheckout(fox, page) {
+  if (isOnQueue(page.url())) return
 
   setRushLabel(fox, 'Adding to cart…')
-  const addBtn = page
-    .locator('#buy_button_container button[data-internal-id^="add-to-cart-"], button.buy-link[data-internal-id^="add-to-cart-"]')
-    .or(page.getByRole('button', { name: /preorder now|add to cart/i }))
-  if (!(await clickFirstVisible(addBtn, 12000))) {
+  if (!(await clickByScript(page, scriptClickAdd, 12000))) {
     throw new Error('Could not find Preorder now / Add to cart')
   }
 
   setRushLabel(fox, 'Proceeding to cart…')
-  const proceedBtn = page
-    .locator('[aria-label="Proceed to Cart"], #minicart button[sf-checkout]')
-    .or(page.getByRole('button', { name: /proceed to cart/i }))
-  const viewCart = page.locator('a.view-cart').or(page.getByRole('link', { name: /view cart/i }))
-  const checkout = page.locator('a[sf-checkout].btn-primary')
-  let next = false
-  const until = Date.now() + 16000
-  while (Date.now() < until && !next) {
-    if (await proceedBtn.first().isVisible().catch(() => false)) {
-      await proceedBtn.first().click({ timeout: 4000 })
-      next = true
-      break
-    }
-    if (await viewCart.first().isVisible().catch(() => false)) {
-      await viewCart.first().click({ timeout: 4000 })
-      next = true
-      break
-    }
-    if (await checkout.first().isVisible().catch(() => false)) {
-      await checkout.first().click({ timeout: 4000 })
-      next = true
-      break
-    }
-    await wait(200)
+  if (!(await clickByScript(page, scriptClickProceed, 16000))) {
+    throw new Error('Could not find Proceed to Cart')
   }
-  if (!next) {
-    const mini = page.locator('#minicart-button')
-    if (await mini.first().isVisible().catch(() => false)) {
-      await mini.first().click({ timeout: 4000 })
-      await wait(400)
-      if (await proceedBtn.first().isVisible().catch(() => false)) {
-        await proceedBtn.first().click({ timeout: 4000 })
-        next = true
-      }
-    }
-  }
-  if (!next) throw new Error('Could not find Proceed to Cart')
+
+  if (isOnQueue(page.url())) return
 
   setRushLabel(fox, 'Continue as guest…')
-  const guest = page
-    .locator('#intersticial_checkout [aria-label="Continue as guest"], button[aria-label="Continue as guest"], button[ng-click="goCart()"]')
-    .or(page.getByRole('button', { name: /continue as guest/i }))
-  const guestClicked = await clickFirstVisible(guest, 20000)
-  if (!guestClicked && !/storequeue|queue-it|\/cart|checkout/i.test(page.url())) {
+  const guestClicked = await clickByScript(page, scriptClickGuest, 20000)
+  if (!guestClicked && !isOnQueue(page.url()) && !/\/cart|checkout/i.test(page.url())) {
     throw new Error('Could not find Continue as guest')
   }
 
   setRushLabel(fox, 'Waiting in queue…')
-  await page
-    .waitForURL(/storequeue\.wizards\.com|queue-it\.net|queueittoken=/i, { timeout: 60000 })
-    .catch(() => undefined)
+  await page.waitForURL(/storequeue\.wizards\.com|queue-it\.net|queueittoken=/i, { timeout: 60000 }).catch(() => undefined)
 }
 
 async function rushCheckoutFox(fox) {
   const page = pageOf(fox)
   if (!page) throw new Error(`Fox ${fox.id} has no page`)
-  pausedIds.add(fox.id)
   setRushLabel(fox, 'Adding to cart…')
   try {
     await runRushCheckout(fox, page)
-    fox.statusLabel = 'In checkout / queue'
+    if (isOnQueue(page.url())) fox.statusLabel = 'Waiting in queue…'
+    else fox.statusLabel = 'In checkout / queue'
   } catch (error) {
     fox.status = 'error'
     fox.error = error instanceof Error ? error.message : String(error)
     fox.statusLabel = 'Error'
   } finally {
     fox.navigating = false
-    pausedIds.delete(fox.id)
     emitUpdate()
   }
 }
