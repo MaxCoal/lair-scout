@@ -510,9 +510,12 @@ function parseAddress(profile) {
   let state = ''
   let zip = ''
   const last = lines[lines.length - 1] || ''
-  const cityStateZip = last.match(/^(.+?),\s*([A-Za-z]{2})\s+(\d{5}(?:-\d{4})?)$/)
+  const zipOnly = last.match(/^(\d{5}(?:-\d{4})?)$/)
+  const cityStateZip =
+    last.match(/^(.+?),\s*([A-Za-z]{2})\s+(\d{5}(?:-\d{4})?)$/) ||
+    last.match(/^(.+?)\s+([A-Za-z]{2})\s+(\d{5}(?:-\d{4})?)$/)
   if (cityStateZip) {
-    city = cityStateZip[1]
+    city = cityStateZip[1].replace(/,\s*$/, '').trim()
     state = cityStateZip[2].toUpperCase()
     zip = cityStateZip[3]
     if (lines.length === 1) {
@@ -520,6 +523,18 @@ function parseAddress(profile) {
     } else {
       street = lines[0]
       if (lines.length > 2) street2 = lines.slice(1, -1).join(', ')
+    }
+  } else if (zipOnly && lines.length >= 2) {
+    zip = zipOnly[1]
+    const prev = lines[lines.length - 2]
+    const cityState = prev.match(/^(.+?),\s*([A-Za-z]{2})$/) || prev.match(/^(.+?)\s+([A-Za-z]{2})$/)
+    if (cityState) {
+      city = cityState[1].replace(/,\s*$/, '').trim()
+      state = cityState[2].toUpperCase()
+      street = lines[0]
+      if (lines.length > 3) street2 = lines.slice(1, -2).join(', ')
+    } else {
+      street2 = lines.slice(1).join(', ')
     }
   } else if (lines.length > 1) {
     street2 = lines.slice(1).join(', ')
@@ -541,27 +556,46 @@ function fillProfileInPage(data) {
   if (!data || (!data.name && !data.street && !data.address)) return 0
   const setValue = (el, value) => {
     if (!el || !value || el.disabled || el.readOnly) return false
-    if (document.activeElement === el) return false
+    const next = String(value)
+    const current = String(el.value || '')
+    if (current === next) return false
+    if (document.activeElement === el && current && current !== next) return false
     const tag = el.tagName
     if (tag === 'SELECT') {
-      const want = String(value).toLowerCase()
+      const want = next.toLowerCase()
       const opt = [...el.options].find(
-        (item) => item.value.toLowerCase() === want || item.text.toLowerCase() === want || item.value.toLowerCase() === want.slice(0, 2)
+        (item) =>
+          item.value.toLowerCase() === want ||
+          item.text.toLowerCase() === want ||
+          item.value.toLowerCase() === want.slice(0, 2) ||
+          item.text.toLowerCase().startsWith(want)
       )
       if (!opt) return false
       el.value = opt.value
     } else {
       const proto = tag === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
       const desc = Object.getOwnPropertyDescriptor(proto, 'value')
-      if (desc && desc.set) desc.set.call(el, value)
-      else el.value = value
+      if (desc && desc.set) desc.set.call(el, next)
+      else el.value = next
     }
     el.dispatchEvent(new Event('input', { bubbles: true }))
+    el.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertFromPaste', data: next }))
     el.dispatchEvent(new Event('change', { bubbles: true }))
     return true
   }
   const blobOf = (el) =>
-    [el.id, el.name, el.placeholder, el.getAttribute('aria-label'), el.autocomplete, el.getAttribute('ng-model'), el.getAttribute('data-internal-id')]
+    [
+      el.id,
+      el.name,
+      el.placeholder,
+      el.getAttribute('aria-label'),
+      el.autocomplete,
+      el.getAttribute('ng-model'),
+      el.getAttribute('formcontrolname'),
+      el.getAttribute('data-internal-id'),
+      el.getAttribute('data-template-value'),
+      el.getAttribute('data-field')
+    ]
       .filter(Boolean)
       .join(' ')
       .toLowerCase()
@@ -571,22 +605,33 @@ function fillProfileInPage(data) {
     const type = (el.getAttribute('type') || 'text').toLowerCase()
     if (['hidden', 'checkbox', 'radio', 'password', 'submit', 'button', 'file'].includes(type)) continue
     const blob = blobOf(el)
-    if (/email/.test(blob)) continue
-    const isFirst = /first[-_\s]?name|given[-_\s]?name/.test(blob)
-    const isLast = /last[-_\s]?name|family[-_\s]?name|surname/.test(blob)
+    const auto = String(el.autocomplete || '').toLowerCase()
+    if (/email/.test(blob) || auto === 'email') continue
+    const isFirst = /first[-_\s]?name|given[-_\s]?name/.test(blob) || auto === 'given-name'
+    const isLast = /last[-_\s]?name|family[-_\s]?name|surname/.test(blob) || auto === 'family-name'
     const isFullName =
       /full[-_\s]?name|customer[-_\s]?name|shipping[-_\s]?name|ship[-_\s]?name|billing[-_\s]?name/.test(blob) ||
-      el.autocomplete === 'name' ||
+      auto === 'name' ||
       /^(name|full_name|fullname|shipping_name|billing_name)$/i.test(el.name || el.id || '')
+    const isStreet2 =
+      /address[-_\s]?(line[-_\s]?)?2|address2|addr2|apt|suite|unit/.test(blob) || auto === 'address-line2'
+    const isStreet =
+      /street[-_\s]?address|shipping[-_\s]?address|billing[-_\s]?address|address[-_\s]?(line[-_\s]?)?1|address1|addr1|shippingaddress|billingaddress|(^|[-_\s.])address($|[-_\s.])/.test(
+        blob
+      ) ||
+      auto === 'street-address' ||
+      auto === 'address-line1'
     if (isFirst && data.firstName) filled += setValue(el, data.firstName) ? 1 : 0
     else if (isLast && data.lastName) filled += setValue(el, data.lastName) ? 1 : 0
     else if (isFullName && !/user|login|account|company|card/.test(blob) && data.name) filled += setValue(el, data.name) ? 1 : 0
-    else if (/address[-_\s]?(line[-_\s]?)?2|address2|apt|suite|unit/.test(blob) && data.street2) filled += setValue(el, data.street2) ? 1 : 0
-    else if (/street|address[-_\s]?(line[-_\s]?)?1|address1|(^|[-_\s])address($|[-_\s])/.test(blob) && data.street)
-      filled += setValue(el, data.street) ? 1 : 0
-    else if (/city|town|locality/.test(blob) && data.city) filled += setValue(el, data.city) ? 1 : 0
-    else if (/state|province|region/.test(blob) && data.state) filled += setValue(el, data.state) ? 1 : 0
-    else if (/zip|postal|postcode/.test(blob) && data.zip) filled += setValue(el, data.zip) ? 1 : 0
+    else if (isStreet2 && data.street2) filled += setValue(el, data.street2) ? 1 : 0
+    else if (isStreet && data.street) filled += setValue(el, data.street) ? 1 : 0
+    else if ((/city|town|locality|shipping[-_\s]?city/.test(blob) || auto === 'address-level2') && data.city)
+      filled += setValue(el, data.city) ? 1 : 0
+    else if ((/state|province|region|shipping[-_\s]?state/.test(blob) || auto === 'address-level1') && data.state)
+      filled += setValue(el, data.state) ? 1 : 0
+    else if ((/zip|postal|postcode|shipping[-_\s]?zip/.test(blob) || auto === 'postal-code') && data.zip)
+      filled += setValue(el, data.zip) ? 1 : 0
   }
   return filled
 }
@@ -594,7 +639,20 @@ function fillProfileInPage(data) {
 async function applyShippingToFox(fox) {
   const page = pageOf(fox)
   if (!page || (!shippingProfile.name && !shippingProfile.address)) return
-  await page.evaluate(fillProfileInPage, parseAddress(shippingProfile)).catch(() => 0)
+  const data = parseAddress(shippingProfile)
+  await Promise.all(page.frames().map((frame) => frame.evaluate(fillProfileInPage, data).catch(() => 0)))
+}
+
+function scheduleFill(fox) {
+  if (fox.fillTimer) clearTimeout(fox.fillTimer)
+  let n = 0
+  const step = async () => {
+    fox.fillTimer = null
+    await applyShippingToFox(fox)
+    n += 1
+    if (n < 20) fox.fillTimer = setTimeout(() => { void step() }, 400)
+  }
+  void step()
 }
 
 function hookProfile(fox) {
@@ -602,10 +660,10 @@ function hookProfile(fox) {
   fox.profileHooked = true
   const attach = (page) => {
     page.on('domcontentloaded', () => {
-      void applyShippingToFox(fox)
+      scheduleFill(fox)
     })
     page.on('framenavigated', (frame) => {
-      if (frame === page.mainFrame()) void applyShippingToFox(fox)
+      if (frame === page.mainFrame()) scheduleFill(fox)
     })
   }
   for (const page of fox.context.pages()) attach(page)
@@ -697,6 +755,7 @@ async function spawnFox(foxId, profileDir) {
 async function killFox(foxId) {
   const fox = instances.get(foxId)
   if (!fox) return
+  if (fox.fillTimer) clearTimeout(fox.fillTimer)
   instances.delete(foxId)
   try {
     await fox.context.close()
@@ -959,7 +1018,7 @@ async function runRushCheckout(fox, page) {
   }
 
   await wait(600)
-  await page.evaluate(fillProfileInPage, parseAddress(shippingProfile)).catch(() => 0)
+  scheduleFill(fox)
 
   setRushLabel(fox, 'Waiting in queue…')
   await page.waitForURL(/storequeue\.wizards\.com|queue-it\.net|queueittoken=/i, { timeout: 60000 }).catch(() => undefined)
@@ -1018,7 +1077,7 @@ async function handle(msg) {
         name: String(msg.profile?.name || ''),
         address: String(msg.profile?.address || '')
       }
-      await Promise.allSettled([...instances.values()].map((fox) => applyShippingToFox(fox)))
+      for (const fox of instances.values()) scheduleFill(fox)
     } else if (cmd === 'reload') {
       const fox = instances.get(msg.foxId)
       if (fox) {

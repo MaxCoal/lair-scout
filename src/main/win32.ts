@@ -3,7 +3,7 @@ import { createInterface } from 'node:readline'
 import { join } from 'node:path'
 
 export type Win32Opts = {
-  action: 'find' | 'hide' | 'show' | 'place' | 'move' | 'clip'
+  action: 'find' | 'hide' | 'show' | 'place' | 'move' | 'clip' | 'post'
   title?: string
   hwnd?: number
   pid?: number
@@ -15,6 +15,9 @@ export type Win32Opts = {
   y?: number
   width?: number
   height?: number
+  msg?: number
+  wParam?: number
+  lParam?: number
 }
 
 class Win32Host {
@@ -53,7 +56,10 @@ class Win32Host {
           x: Math.round(opts.x ?? 0),
           y: Math.round(opts.y ?? 0),
           width: Math.round(opts.width ?? 1280),
-          height: Math.round(opts.height ?? 720)
+          height: Math.round(opts.height ?? 720),
+          msg: opts.msg ?? 0,
+          wParam: opts.wParam ?? 0,
+          lParam: opts.lParam ?? 0
         })}\n`
       )
     })
@@ -147,6 +153,15 @@ export async function moveScoutWindow(
 
 export async function setClipChildren(hwnd: number, clip: boolean): Promise<number> {
   return controlWindow({ action: 'clip', hwnd, clip })
+}
+
+export async function postWindowMessage(
+  hwnd: number,
+  msg: number,
+  wParam: number,
+  lParam: number
+): Promise<number> {
+  return controlWindow({ action: 'post', hwnd, msg, wParam, lParam })
 }
 
 export function stopWin32Host(): void {

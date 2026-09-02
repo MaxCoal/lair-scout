@@ -50,6 +50,8 @@ public static class LairScoutNative {
   [DllImport("user32.dll")] public static extern bool ScreenToClient(IntPtr hWnd, ref FoxPoint lpPoint);
   [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
   [DllImport("shcore.dll")] public static extern int SetProcessDpiAwareness(int value);
+  [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern IntPtr SetFocus(IntPtr hWnd);
 
   static IFoxTaskbarList taskbar;
 
@@ -159,8 +161,8 @@ public static class LairScoutNative {
       x = p.X;
       y = p.Y;
     }
-    ShowWindow(hwnd, 8);
-    SetWindowPos(hwnd, IntPtr.Zero, x, y, w, h, 0x0040 | 0x0020);
+    SetWindowPos(hwnd, IntPtr.Zero, x, y, w, h, 0x0010 | 0x0020);
+    SetFocus(hwnd);
   }
 
   public static void MoveEmbedded(IntPtr hwnd, IntPtr owner, int screenX, int screenY, int w, int h) {
@@ -178,14 +180,7 @@ public static class LairScoutNative {
       x = p.X;
       y = p.Y;
     }
-    uint flags = 0x0004 | 0x0010;
-    FoxRect cur;
-    if (GetWindowRect(hwnd, out cur)) {
-      int curW = cur.Right - cur.Left;
-      int curH = cur.Bottom - cur.Top;
-      if (Math.Abs(curW - w) < 4 && Math.Abs(curH - h) < 4) flags |= 0x0001;
-    }
-    SetWindowPos(hwnd, IntPtr.Zero, x, y, w, h, flags);
+    SetWindowPos(hwnd, IntPtr.Zero, x, y, w, h, 0x0004 | 0x0010 | 0x0001);
   }
 
   public static void SetClipChildren(IntPtr hwnd, bool clip) {
@@ -321,6 +316,14 @@ function Invoke-FoxAction($cmd) {
     [LairScoutNative]::MoveEmbedded($hwnd, [IntPtr]$owner, $x, $y, $w, $h)
   } elseif ($action -eq "clip") {
     [LairScoutNative]::SetClipChildren($hwnd, [bool]$cmd.clip)
+  } elseif ($action -eq "post") {
+    $msg = 0
+    if ($cmd.msg) { $msg = [uint32]$cmd.msg }
+    $wParam = [IntPtr]::Zero
+    $lParam = [IntPtr]::Zero
+    if ($null -ne $cmd.wParam) { $wParam = [IntPtr]([int64]$cmd.wParam) }
+    if ($null -ne $cmd.lParam) { $lParam = [IntPtr]([int64]$cmd.lParam) }
+    [void][LairScoutNative]::PostMessage($hwnd, $msg, $wParam, $lParam)
   }
 
   return $raw

@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { join } from 'node:path'
 import type { AppSettings, InstanceSnapshot, RamSnapshot, ShippingProfile } from '@shared/types'
-import { findScoutWindow, hideScoutWindow, moveScoutWindow, placeScoutWindow, setClipChildren, showWindow, stopWin32Host } from './win32'
+import { findScoutWindow, hideScoutWindow, moveScoutWindow, placeScoutWindow, postWindowMessage, setClipChildren, showWindow, stopWin32Host } from './win32'
 import { readRam } from './memory'
 import { emptySettings, loadSettings, saveSettings } from './settings'
 
@@ -48,10 +48,15 @@ export class ScoutManager {
   private shipping: ShippingProfile = { name: '', address: '' }
   private settings: AppSettings = emptySettings()
   private dockTimer: NodeJS.Timeout | null = null
-  private interactTimer: NodeJS.Timeout | null = null
   private ramTimer: NodeJS.Timeout | null = null
+  private relayoutTimer: NodeJS.Timeout | null = null
   private relayoutBusy = false
   private relayoutQueued = false
+  private relayoutAllowResize = false
+  private quietUntil = 0
+  private clipOn = false
+  private mouseHooked = false
+  private interactChain: Promise<void> = Promise.resolve()
   private stageRect: StageRect | null = null
   private strayState: 'pending' | 'cleaning' | 'done' = 'pending'
   private strayDone: Promise<void>
@@ -67,8 +72,8 @@ export class ScoutManager {
   attach(window: BrowserWindow): void {
     this.window = window
     this.armDockTimer()
-    this.armInteractTimer()
     this.armRamTimer()
+    this.hookMouseMessages(window)
     void loadSettings().then((settings) => {
       this.settings = settings
       this.shipping = { name: settings.name, address: settings.address }
@@ -76,10 +81,10 @@ export class ScoutManager {
       void this.pushProfile()
     })
     window.on('move', () => {
-      this.queueRelayout()
+      this.scheduleRelayout(false)
     })
     window.on('resize', () => {
-      this.queueRelayout()
+      this.scheduleRelayout(true)
     })
   }
 
@@ -237,15 +242,96 @@ export class ScoutManager {
   }
 
   async interact(id: string, rect: StageRect): Promise<void> {
-    this.stageRect = rect
+    const run = async (): Promise<void> => {
+      this.stageRect = rect
+      const state = this.windows.get(id)
+      if (!state) return
+      await this.embedLive(id, state, rect)
+    }
+    this.interactChain = this.interactChain.then(run, run)
+    await this.interactChain
+  }
+
+  async stopInteract(id: string): Promise<void> {
     const state = this.windows.get(id)
     if (!state) return
-    const already = state.interacting
-    if (already) {
+    if (state.poppedOut) {
+      state.interacting = false
+      return
+    }
+    state.interacting = false
+    state.lastPhys = undefined
+    state.hwnd = await hideScoutWindow({
+      pid: state.pid,
+      hwnd: state.hwnd,
+      title: `LairScout-${id}`,
+      owner: this.ownerHwnd()
+    })
+    this.fireOn(id, 'setPaused', { foxId: id, paused: false })
+    if (![...this.windows.values()].some((item) => item.interacting)) {
+      await this.ensureClip(false)
+    }
+    this.broadcast()
+  }
+
+  async popOut(id: string): Promise<void> {
+    const run = async (): Promise<void> => {
+      const state = this.windows.get(id)
+      if (!state) return
+      state.interacting = false
+      state.lastPhys = undefined
+      state.poppedOut = true
+      const hwnd = await findScoutWindow({ pid: state.pid, hwnd: state.hwnd, title: `LairScout-${id}` })
+      if (hwnd) state.hwnd = hwnd
+      if (state.hwnd) await showWindow(state.hwnd)
+      this.fireOn(id, 'setPaused', { foxId: id, paused: true })
+      if (![...this.windows.values()].some((item) => item.interacting)) {
+        await this.ensureClip(false)
+      }
+      this.broadcast()
+    }
+    this.interactChain = this.interactChain.then(run, run)
+    await this.interactChain
+  }
+
+  async dock(id: string): Promise<void> {
+    const run = async (): Promise<void> => {
+      const state = this.windows.get(id)
+      if (!state) return
+      state.poppedOut = false
+      state.lastPhys = undefined
+      if (this.stageRect) {
+        state.interacting = false
+        await this.embedLive(id, state, this.stageRect)
+        return
+      }
+      state.interacting = false
+      state.hwnd = await hideScoutWindow({
+        pid: state.pid,
+        hwnd: state.hwnd,
+        title: `LairScout-${id}`,
+        owner: this.ownerHwnd()
+      })
+      this.fireOn(id, 'setPaused', { foxId: id, paused: false })
+      if (![...this.windows.values()].some((item) => item.interacting)) {
+        await this.ensureClip(false)
+      }
+      this.broadcast()
+    }
+    this.interactChain = this.interactChain.then(run, run)
+    await this.interactChain
+  }
+
+  private async embedLive(id: string, state: WindowState, rect: StageRect): Promise<void> {
+    if (rect.width < 80 || rect.height < 60) return
+    if (state.poppedOut) return
+    if (state.interacting) {
       const moved = await this.placeState(id, state, rect, 'move')
       if (moved) state.hwnd = moved
       return
     }
+    state.interacting = true
+    state.poppedOut = false
     this.fireOn(id, 'setPaused', { foxId: id, paused: true })
     for (const [otherId, other] of this.windows) {
       if (otherId !== id && other.interacting) {
@@ -260,71 +346,22 @@ export class ScoutManager {
         })
       }
     }
-    state.interacting = true
-    state.poppedOut = false
-    await setClipChildren(this.ownerHwnd(), true)
+    await this.ensureClip(true)
+    if (state.poppedOut) return
     const placed = await this.placeState(id, state, rect, 'place')
+    if (state.poppedOut) {
+      state.interacting = false
+      if (state.hwnd) await showWindow(state.hwnd)
+      return
+    }
     if (placed) state.hwnd = placed
-    this.broadcast()
-  }
-
-  async stopInteract(id: string): Promise<void> {
-    const state = this.windows.get(id)
-    if (!state) return
-    state.interacting = false
-    state.lastPhys = undefined
-    state.hwnd = await hideScoutWindow({
-      pid: state.pid,
-      hwnd: state.hwnd,
-      title: `LairScout-${id}`,
-      owner: this.ownerHwnd()
-    })
-    this.fireOn(id, 'setPaused', { foxId: id, paused: false })
-    if (![...this.windows.values()].some((item) => item.interacting)) {
-      await setClipChildren(this.ownerHwnd(), false)
-    }
-    this.broadcast()
-  }
-
-  async popOut(id: string): Promise<void> {
-    const state = this.windows.get(id)
-    if (!state) return
-    state.interacting = false
-    state.lastPhys = undefined
-    const hwnd = await findScoutWindow({ pid: state.pid, hwnd: state.hwnd, title: `LairScout-${id}` })
-    if (hwnd) state.hwnd = hwnd
-    if (state.hwnd) await showWindow(state.hwnd)
-    state.poppedOut = true
-    this.fireOn(id, 'setPaused', { foxId: id, paused: true })
-    if (![...this.windows.values()].some((item) => item.interacting)) {
-      await setClipChildren(this.ownerHwnd(), false)
-    }
-    this.broadcast()
-  }
-
-  async dock(id: string): Promise<void> {
-    const state = this.windows.get(id)
-    if (!state) return
-    state.interacting = false
-    state.poppedOut = false
-    state.lastPhys = undefined
-    state.hwnd = await hideScoutWindow({
-      pid: state.pid,
-      hwnd: state.hwnd,
-      title: `LairScout-${id}`,
-      owner: this.ownerHwnd()
-    })
-    this.fireOn(id, 'setPaused', { foxId: id, paused: false })
-    if (![...this.windows.values()].some((item) => item.interacting)) {
-      await setClipChildren(this.ownerHwnd(), false)
-    }
     this.broadcast()
   }
 
   async shutdown(): Promise<void> {
     this.shuttingDown = true
     if (this.dockTimer) clearInterval(this.dockTimer)
-    if (this.interactTimer) clearInterval(this.interactTimer)
+    if (this.relayoutTimer) clearTimeout(this.relayoutTimer)
     if (this.ramTimer) clearInterval(this.ramTimer)
     const ids = [...this.workers.keys()]
     await Promise.allSettled(ids.map((id) => this.callOn(id, 'shutdown', {}).catch(() => undefined)))
@@ -355,18 +392,21 @@ export class ScoutManager {
     }
     if (state.lastPhys) {
       const samePos =
-        Math.abs(state.lastPhys.x - next.x) < 2 && Math.abs(state.lastPhys.y - next.y) < 2
+        Math.abs(state.lastPhys.x - next.x) < 4 && Math.abs(state.lastPhys.y - next.y) < 4
       const sameSize =
-        Math.abs(state.lastPhys.width - next.width) < 4 &&
-        Math.abs(state.lastPhys.height - next.height) < 4
-      if (mode === 'move' && samePos && sameSize) return state.hwnd
-      if (sameSize) {
+        Math.abs(state.lastPhys.width - next.width) < 8 &&
+        Math.abs(state.lastPhys.height - next.height) < 8
+      if (mode === 'move') {
         next.width = state.lastPhys.width
         next.height = state.lastPhys.height
+        if (samePos) return state.hwnd
+      } else if (samePos && sameSize) {
+        return state.hwnd
       }
     }
     const opts = { pid: state.pid, hwnd: state.hwnd, title: `LairScout-${id}`, owner: this.ownerHwnd() }
     const hwnd = mode === 'place' ? await placeScoutWindow(opts, next) : await moveScoutWindow(opts, next)
+    this.quietUntil = Date.now() + 300
     if (hwnd) state.lastPhys = next
     return hwnd
   }
@@ -377,7 +417,52 @@ export class ScoutManager {
     return buf.length >= 8 ? Number(buf.readBigUInt64LE(0)) : buf.readUInt32LE(0)
   }
 
+  private hookMouseMessages(window: BrowserWindow): void {
+    if (this.mouseHooked) return
+    this.mouseHooked = true
+    const messages = [0x020e, 0x0207, 0x0208, 0x0209]
+    for (const msg of messages) {
+      try {
+        window.hookWindowMessage(msg, (wParam, lParam) => {
+          void this.forwardMouse(msg, wParam, lParam)
+        })
+      } catch {
+        /* not Windows / unsupported */
+      }
+    }
+  }
+
+  private async forwardMouse(msg: number, wParam: Buffer | number, lParam: Buffer | number): Promise<void> {
+    let hwnd = 0
+    for (const state of this.windows.values()) {
+      if (state.interacting && state.hwnd) {
+        hwnd = state.hwnd
+        break
+      }
+    }
+    if (!hwnd) return
+    await postWindowMessage(hwnd, msg, wordToUInt(wParam), wordToUInt(lParam))
+  }
+
+  private async ensureClip(clip: boolean): Promise<void> {
+    if (this.clipOn === clip) return
+    this.clipOn = clip
+    this.quietUntil = Date.now() + 300
+    await setClipChildren(this.ownerHwnd(), clip)
+  }
+
+  private scheduleRelayout(allowResize: boolean): void {
+    if (this.shuttingDown || Date.now() < this.quietUntil) return
+    if (allowResize) this.relayoutAllowResize = true
+    if (this.relayoutTimer) clearTimeout(this.relayoutTimer)
+    this.relayoutTimer = setTimeout(() => {
+      this.relayoutTimer = null
+      this.queueRelayout()
+    }, allowResize ? 160 : 80)
+  }
+
   private queueRelayout(): void {
+    if (Date.now() < this.quietUntil) return
     if (this.relayoutBusy) {
       this.relayoutQueued = true
       return
@@ -391,10 +476,12 @@ export class ScoutManager {
       return
     }
     this.relayoutBusy = true
+    const allowResize = this.relayoutAllowResize
+    this.relayoutAllowResize = false
     try {
       for (const [id, state] of this.windows) {
         if (!state.interacting) continue
-        const hwnd = await this.placeState(id, state, this.stageRect, 'move')
+        const hwnd = await this.placeState(id, state, this.stageRect, allowResize ? 'place' : 'move')
         if (hwnd) state.hwnd = hwnd
       }
     } finally {
@@ -426,14 +513,6 @@ export class ScoutManager {
     for (const win of BrowserWindow.getAllWindows()) {
       if (!win.isDestroyed()) win.webContents.send('stats:ram', ram)
     }
-  }
-
-  private armInteractTimer(): void {
-    if (this.interactTimer) return
-    this.interactTimer = setInterval(() => {
-      if (this.shuttingDown) return
-      this.queueRelayout()
-    }, 250)
   }
 
   private armDockTimer(): void {
@@ -739,4 +818,13 @@ function resolveNode(): string {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function wordToUInt(value: Buffer | number): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value >>> 0
+  if (Buffer.isBuffer(value)) {
+    if (value.length >= 8) return Number(value.readBigUInt64LE(0) & 0xffffffffn)
+    if (value.length >= 4) return value.readUInt32LE(0)
+  }
+  return 0
 }

@@ -15,6 +15,8 @@ type Props = {
 export default function FocusView({ fox, driveAll, fleetCount, live, onBack, onRestart }: Props) {
   const stageRef = useRef<HTMLDivElement>(null)
   const lastMove = useRef(0)
+  const poppedRef = useRef(fox.poppedOut)
+  poppedRef.current = fox.poppedOut
 
   useEffect(() => {
     stageRef.current?.focus()
@@ -23,10 +25,13 @@ export default function FocusView({ fox, driveAll, fleetCount, live, onBack, onR
   useEffect(() => {
     if (!live) return undefined
     const last = { x: 0, y: 0, width: 0, height: 0 }
-    let timer = 0
-    const report = (): void => {
+    let debounce = 0
+    let kickTimer = 0
+    let cancelled = false
+    const report = (force: boolean): void => {
+      if (poppedRef.current) return
       const el = stageRef.current
-      if (!el) return
+      if (!el || cancelled) return
       const rect = el.getBoundingClientRect()
       const next = {
         x: Math.round(rect.x),
@@ -34,14 +39,10 @@ export default function FocusView({ fox, driveAll, fleetCount, live, onBack, onR
         width: Math.round(rect.width),
         height: Math.round(rect.height)
       }
-      if (
-        Math.abs(next.x - last.x) < 2 &&
-        Math.abs(next.y - last.y) < 2 &&
-        Math.abs(next.width - last.width) < 4 &&
-        Math.abs(next.height - last.height) < 4
-      ) {
-        return
-      }
+      if (next.width < 80 || next.height < 60) return
+      const posDelta = Math.max(Math.abs(next.x - last.x), Math.abs(next.y - last.y))
+      const sizeDelta = Math.max(Math.abs(next.width - last.width), Math.abs(next.height - last.height))
+      if (!force && last.width > 0 && posDelta < 4 && sizeDelta < 16) return
       last.x = next.x
       last.y = next.y
       last.width = next.width
@@ -49,15 +50,20 @@ export default function FocusView({ fox, driveAll, fleetCount, live, onBack, onR
       void window.lairscout.interact(fox.id, next)
     }
     const schedule = (): void => {
-      window.clearTimeout(timer)
-      timer = window.setTimeout(report, 50)
+      window.clearTimeout(debounce)
+      debounce = window.setTimeout(() => report(false), 80)
     }
-    report()
+    kickTimer = window.setTimeout(() => {
+      if (poppedRef.current) void window.lairscout.dock(fox.id)
+      else report(true)
+    }, 50)
     const observer = new ResizeObserver(schedule)
     if (stageRef.current) observer.observe(stageRef.current)
     window.addEventListener('resize', schedule)
     return () => {
-      window.clearTimeout(timer)
+      cancelled = true
+      window.clearTimeout(debounce)
+      window.clearTimeout(kickTimer)
       observer.disconnect()
       window.removeEventListener('resize', schedule)
       void window.lairscout.stopInteract(fox.id)
@@ -140,10 +146,24 @@ export default function FocusView({ fox, driveAll, fleetCount, live, onBack, onR
           if (live) {
             event.preventDefault()
             event.stopPropagation()
+            const dx = event.deltaX || (event.shiftKey ? event.deltaY : 0)
+            if (dx) void window.lairscout.scroll({ id: fox.id, dx, dy: 0 })
             return
           }
           event.preventDefault()
           void window.lairscout.scroll({ id, dx: event.deltaX, dy: event.deltaY })
+        }}
+        onMouseDown={(event) => {
+          if (live && event.button === 1) {
+            event.preventDefault()
+            event.stopPropagation()
+          }
+        }}
+        onAuxClick={(event) => {
+          if (live && event.button === 1) {
+            event.preventDefault()
+            event.stopPropagation()
+          }
         }}
         onContextMenu={(event) => event.preventDefault()}
       >

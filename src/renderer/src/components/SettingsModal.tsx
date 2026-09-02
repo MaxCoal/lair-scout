@@ -104,7 +104,7 @@ export default function SettingsModal({ open, onClose }: Props) {
           />
         </label>
         <div className="top-actions" style={{ justifyContent: 'flex-end' }}>
-          {saved ? <span className="hint">Saved. Live boxes will autofill on the next checkout page.</span> : null}
+          {saved ? <span className="hint">Saved. Open checkout and the fields should fill within a few seconds.</span> : null}
           <button className="btn" type="button" onClick={onClose}>
             Close
           </button>
