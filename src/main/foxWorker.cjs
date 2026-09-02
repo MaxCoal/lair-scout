@@ -173,22 +173,26 @@ async function extractFrame(frame) {
     let messageId = ''
     let messageHeader = ''
     let messageTime = ''
-    let messageText = ''
+    let messageText = pick(['#MainPart_pMessageOnQueueTicket'])
     if (rawMsg && typeof rawMsg === 'object') {
       messageId = String(unwrap(rawMsg.id) || '')
       messageHeader = String(unwrap(rawMsg.header) || '').trim()
-      messageText = String(unwrap(rawMsg.text) || '').trim()
+      messageText = messageText || String(unwrap(rawMsg.text) || '').trim()
       const stamp = String(unwrap(rawMsg.timestampFormatted) || '').replace(/\u202f/g, ' ').trim()
       const zone = String(unwrap(rawMsg.timeZonePostfix) || '').trim()
       messageTime = [stamp, zone].filter(Boolean).join(' ')
     }
+    if (messageText) {
+      messageHeader = messageHeader || pick(['#MainPart_h2MessageOnQueueTicket'])
+      const stamp = pick(['#MainPart_h2MessageOnQueueTicketTimeText']).replace(/\u202f/g, ' ')
+      const zone = pick(['#MainPart_h2MessageOnQueueTicketTimeTextTimeZonePostfix'])
+      messageTime = messageTime || [stamp, zone].filter(Boolean).join(' ')
+    }
     if (!messageText) {
-      messageText = pick(['#MainPart_pMessageOnQueueTicket'])
-      if (messageText) {
-        messageHeader = messageHeader || pick(['#MainPart_h2MessageOnQueueTicket'])
-        const stamp = pick(['#MainPart_h2MessageOnQueueTicketTimeText']).replace(/\u202f/g, ' ')
-        const zone = pick(['#MainPart_h2MessageOnQueueTicketTimeTextTimeZonePostfix'])
-        messageTime = messageTime || [stamp, zone].filter(Boolean).join(' ')
+      const box = document.querySelector('#MainPart_divTimeBox')
+      if (box && box.offsetHeight) {
+        const copy = String(box.innerText || '').trim()
+        if (/message last updated|sold out|out of stock/i.test(copy)) messageText = copy
       }
     }
     let stockText = ''
@@ -250,6 +254,26 @@ function toQueueNotice(extracted) {
   return { id, header, time, text, kind }
 }
 
+function noticeFromInner(inner) {
+  const src = String(inner || '')
+  const idx = src.search(/Message last updated:/i)
+  if (idx < 0) return null
+  const slice = src.slice(idx)
+  const timeMatch = slice.match(/Message last updated:\s*([^\n]+)/i)
+  const rest = slice.replace(/Message last updated:\s*[^\n]+\n*/i, '')
+  const cut = rest.split(/\n\s*DO NOT CLOSE|\n\s*YES! You|\n\s*A couple of reminders/i)[0]
+  const text = cleanNoticeText(cut)
+  if (!text || text.length < 8) return null
+  return {
+    messageHeader: 'Message last updated:',
+    messageTime: String(timeMatch?.[1] || '')
+      .replace(/\u202f/g, ' ')
+      .trim(),
+    messageText: text,
+    messageId: ''
+  }
+}
+
 async function inspectPage(page, previous, wasInQueue) {
   const url = page.url()
   const host = hostOf(url)
@@ -270,6 +294,14 @@ async function inspectPage(page, previous, wasInQueue) {
       }
     }
     extracted = mergeExtract(parts)
+    if (!extracted.messageText) {
+      const fromInner = noticeFromInner(extracted.inner)
+      if (fromInner) {
+        extracted.messageHeader = fromInner.messageHeader
+        extracted.messageTime = fromInner.messageTime
+        extracted.messageText = fromInner.messageText
+      }
+    }
   } catch {
     return {
       status: previous === 'loading' ? 'loading' : 'error',
@@ -642,7 +674,7 @@ async function inspectFox(fox) {
     fox.statusLabel = 'Error'
     return
   }
-  if (fox.navigating) {
+  if (fox.navigating && /about:blank|^data:/i.test(page.url() || '')) {
     fox.status = 'loading'
     if (!fox.statusLabel) fox.statusLabel = 'Loading'
     return
@@ -650,6 +682,9 @@ async function inspectFox(fox) {
   const previous = fox.status
   const read = await inspectPage(page, previous, fox.wasInQueue)
   if (read.status === 'in_queue' || read.status === 'waiting_for_queue') fox.wasInQueue = true
+  if (read.status === 'in_queue' || read.status === 'waiting_for_queue' || read.queueNotice) {
+    fox.navigating = false
+  }
   fox.status = read.status
   fox.statusLabel = read.statusLabel
   fox.waitTime = read.waitTime
@@ -882,6 +917,10 @@ async function runRushCheckout(fox, page) {
 async function rushCheckoutFox(fox) {
   const page = pageOf(fox)
   if (!page) throw new Error(`Fox ${fox.id} has no page`)
+  if (isOnQueue(page.url())) {
+    fox.navigating = false
+    return
+  }
   setRushLabel(fox, 'Adding to cart…')
   try {
     await runRushCheckout(fox, page)
