@@ -17,8 +17,8 @@ const PREQUEUE_COPY =
   /secret lair lounge|waiting room|the (sale|event|drop) has not (yet )?started|has not opened yet|please wait.*begin|we're getting ready|we are getting ready|pre-?queue|before the queue|queue has not started|not started yet|will begin shortly|doors (have not|haven'?t) opened/i
 const IN_QUEUE_COPY =
   /you are (now )?in line|you're in line|you are in the queue|people ahead of you|visitors ahead of you|your estimated wait|estimated wait time|place in line|queue number/i
-const YOUR_TURN = /it['’]?s your turn|you can now enter|you(?:'| a)?re next|the waiting room has ended|you have been redirected/i
-const LONG_WAIT = /more than an hour|over an hour|over 1 hour|>\s*an hour|greater than (an|1) hour/i
+const YOUR_TURN = /it['’]?s your turn|you can now enter|you(?:'| a)?re next|you have been redirected/i
+const LONG_WAIT = /more th[ae]n an hour|over an hour|over 1 hour|>\s*an hour|greater than (an|1) hour/i
 
 /** @type {Map<string, any>} */
 const instances = new Map()
@@ -145,7 +145,15 @@ async function extractFrame(frame) {
       queueNumber: String(unwrap(ticket?.queueNumber) ?? pick(['#MainPart_lbQueueNumber']) ?? ''),
       waitTime: String(
         unwrap(ticket?.whichIsIn) ||
-          pick(['#MainPart_lbWhichIsIn', '#MainPart_lbExpectedServiceTime']) ||
+          pick([
+            '#MainPart_lbWhichIsIn',
+            '#MainPart_lbExpectedServiceTime',
+            '#MainPart_divWaitingTimeText',
+            '#MainPart_divProgressbarBox',
+            '[class*="waitTime"]',
+            '[id*="waitTime"]',
+            '[class*="estimatedWait"]'
+          ]) ||
           ''
       )
     }
@@ -199,24 +207,35 @@ async function inspectPage(page, previous, wasInQueue) {
   const bodyClass = String(extracted.bodyClass || '').toLowerCase()
   const onQueueHost = QUEUE_HOST.test(host)
   const hasToken = /queueittoken=/i.test(url)
-  const yourTurn = YOUR_TURN.test(inner)
-  const waitTime = formatWait(extracted.waitTime) || (LONG_WAIT.test(inner) ? 'more than an hour' : '')
+  const labeledWait = String(inner).match(/estimated wait(?: time)?(?: is)?:\s*([^\n\r]+)/i)
+  const waitTime =
+    formatWait(extracted.waitTime) ||
+    formatWait(labeledWait?.[1] || '') ||
+    (LONG_WAIT.test(inner) ? 'more than an hour' : '')
+  const stillInQueue =
+    Boolean(waitTime) ||
+    IN_QUEUE_COPY.test(inner) ||
+    pageId === 'queue' ||
+    bodyClass.split(/\s+/).includes('queue') ||
+    extracted.queueState === 2
+  const yourTurn = YOUR_TURN.test(inner) && !stillInQueue
 
   let status
-  if (pageId === 'after' || pageId === 'exit' || extracted.queueState === 3 || yourTurn) {
-    status = 'admitted'
-  } else if (pageId === 'queue' || bodyClass.split(/\s+/).includes('queue') || extracted.queueState === 2) {
+  if (stillInQueue) {
     status = 'in_queue'
+  } else if (pageId === 'after' || pageId === 'exit' || extracted.queueState === 3 || yourTurn) {
+    status = 'admitted'
   } else if (
     extracted.isBeforeOrIdle === true ||
     pageId === 'before' ||
     pageId === 'idle' ||
     bodyClass.split(/\s+/).includes('before') ||
-    extracted.queueState === 1
+    extracted.queueState === 1 ||
+    PREQUEUE_COPY.test(inner)
   ) {
     status = 'waiting_for_queue'
   } else if (onQueueHost && extracted.hasQueueUi) {
-    status = IN_QUEUE_COPY.test(inner) ? 'in_queue' : 'waiting_for_queue'
+    status = 'waiting_for_queue'
   } else if (wasInQueue || (hasToken && !onQueueHost)) {
     status = 'admitted'
   } else {
