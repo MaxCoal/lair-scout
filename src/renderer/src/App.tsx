@@ -32,6 +32,7 @@ export default function App() {
   const [muted, setMuted] = useState(false)
   const [driveAll, setDriveAll] = useState(false)
   const [ram, setRam] = useState<RamSnapshot | null>(null)
+  const [rushing, setRushing] = useState(false)
 
   useEffect(() => {
     return window.foxbox.onRam(setRam)
@@ -96,6 +97,12 @@ export default function App() {
     void window.foxbox.gotoAll(url)
   }
 
+  const rushCheckout = (): void => {
+    if (rushing) return
+    setRushing(true)
+    void window.foxbox.rushCheckout().finally(() => setRushing(false))
+  }
+
   const selectFox = (id: string, live: boolean): void => {
     setFocusedId(id)
     setLiveId(live ? id : null)
@@ -119,6 +126,8 @@ export default function App() {
         driveAll={driveAll}
         onUrl={setUrl}
         onSendAll={sendAll}
+        onRushCheckout={rushCheckout}
+        rushing={rushing}
         onScaleTo={(next) => window.foxbox.scaleTo(next)}
         onToggleMute={() => {
           const next = !muted

@@ -14,6 +14,7 @@ const api: FoxboxAPI = {
   scaleTo: (count) => ipcRenderer.invoke('instances:scaleTo', count),
   kill: (id) => ipcRenderer.invoke('instances:kill', id),
   gotoAll: (url) => ipcRenderer.invoke('instances:gotoAll', url),
+  rushCheckout: () => ipcRenderer.invoke('instances:rushCheckout'),
   gotoOne: (id, url) => ipcRenderer.invoke('instances:gotoOne', id, url),
   reload: (id) => ipcRenderer.invoke('instances:reload', id),
   click: (payload: ClickPayload) => {

@@ -123,6 +123,10 @@ export class FirefoxManager {
     await this.call('gotoAll', { url })
   }
 
+  async rushCheckout(): Promise<void> {
+    await this.call('rushCheckout', {}, 150000)
+  }
+
   async gotoOne(id: string, url: string): Promise<void> {
     await this.call('goto', { foxId: id, url })
   }

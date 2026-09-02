@@ -189,6 +189,19 @@ input {
   font-weight: 600;
 }
 
+.btn.rush {
+  background: linear-gradient(180deg, #fbbf24, #d97706);
+  border-color: transparent;
+  color: #1a0b00;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .btn.ghost.active {
   background: var(--fox-dim);
   border-color: rgba(249, 115, 22, 0.4);

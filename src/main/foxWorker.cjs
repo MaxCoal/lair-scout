@@ -397,6 +397,7 @@ async function killFox(foxId) {
 async function navigate(fox, url) {
   fox.navigating = true
   fox.status = 'loading'
+  fox.statusLabel = 'Loading'
   fox.error = undefined
   emitUpdate()
   try {
@@ -419,7 +420,7 @@ async function refreshFox(fox) {
   }
   if (fox.navigating) {
     fox.status = 'loading'
-    fox.statusLabel = 'Loading'
+    if (!fox.statusLabel) fox.statusLabel = 'Loading'
   } else {
     const previous = fox.status
     const read = await inspectPage(page, previous, fox.wasInQueue)
@@ -472,6 +473,125 @@ function scheduleTick() {
   }, delay)
 }
 
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function clickFirstVisible(locator, timeoutMs) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const count = await locator.count().catch(() => 0)
+    for (let i = 0; i < count; i += 1) {
+      const el = locator.nth(i)
+      if (await el.isVisible().catch(() => false)) {
+        await el.click({ timeout: 4000 })
+        return true
+      }
+    }
+    await wait(200)
+  }
+  return false
+}
+
+function setRushLabel(fox, label) {
+  fox.navigating = true
+  fox.status = 'loading'
+  fox.statusLabel = label
+  fox.error = undefined
+  emitUpdate()
+}
+
+async function runRushCheckout(fox, page) {
+  const url = page.url()
+  if (/storequeue\.wizards\.com|queue-it\.net/i.test(url)) return
+
+  const cookies = page.locator('#onetrust-accept-btn-handler, button:has-text("Accept All Cookies")')
+  if (await cookies.first().isVisible().catch(() => false)) {
+    await cookies.first().click().catch(() => undefined)
+    await wait(400)
+  }
+
+  setRushLabel(fox, 'Adding to cart…')
+  const addBtn = page
+    .locator('#buy_button_container button[data-internal-id^="add-to-cart-"], button.buy-link[data-internal-id^="add-to-cart-"]')
+    .or(page.getByRole('button', { name: /preorder now|add to cart/i }))
+  if (!(await clickFirstVisible(addBtn, 12000))) {
+    throw new Error('Could not find Preorder now / Add to cart')
+  }
+
+  setRushLabel(fox, 'Proceeding to cart…')
+  const proceedBtn = page
+    .locator('[aria-label="Proceed to Cart"], #minicart button[sf-checkout]')
+    .or(page.getByRole('button', { name: /proceed to cart/i }))
+  const viewCart = page.locator('a.view-cart').or(page.getByRole('link', { name: /view cart/i }))
+  const checkout = page.locator('a[sf-checkout].btn-primary')
+  let next = false
+  const until = Date.now() + 16000
+  while (Date.now() < until && !next) {
+    if (await proceedBtn.first().isVisible().catch(() => false)) {
+      await proceedBtn.first().click({ timeout: 4000 })
+      next = true
+      break
+    }
+    if (await viewCart.first().isVisible().catch(() => false)) {
+      await viewCart.first().click({ timeout: 4000 })
+      next = true
+      break
+    }
+    if (await checkout.first().isVisible().catch(() => false)) {
+      await checkout.first().click({ timeout: 4000 })
+      next = true
+      break
+    }
+    await wait(200)
+  }
+  if (!next) {
+    const mini = page.locator('#minicart-button')
+    if (await mini.first().isVisible().catch(() => false)) {
+      await mini.first().click({ timeout: 4000 })
+      await wait(400)
+      if (await proceedBtn.first().isVisible().catch(() => false)) {
+        await proceedBtn.first().click({ timeout: 4000 })
+        next = true
+      }
+    }
+  }
+  if (!next) throw new Error('Could not find Proceed to Cart')
+
+  setRushLabel(fox, 'Continue as guest…')
+  const guest = page
+    .locator('#intersticial_checkout [aria-label="Continue as guest"], button[aria-label="Continue as guest"], button[ng-click="goCart()"]')
+    .or(page.getByRole('button', { name: /continue as guest/i }))
+  const guestClicked = await clickFirstVisible(guest, 20000)
+  if (!guestClicked && !/storequeue|queue-it|\/cart|checkout/i.test(page.url())) {
+    throw new Error('Could not find Continue as guest')
+  }
+
+  setRushLabel(fox, 'Waiting in queue…')
+  await page
+    .waitForURL(/storequeue\.wizards\.com|queue-it\.net|queueittoken=/i, { timeout: 60000 })
+    .catch(() => undefined)
+}
+
+async function rushCheckoutFox(fox) {
+  const page = pageOf(fox)
+  if (!page) throw new Error(`Fox ${fox.id} has no page`)
+  pausedIds.add(fox.id)
+  setRushLabel(fox, 'Adding to cart…')
+  try {
+    await runRushCheckout(fox, page)
+    fox.statusLabel = 'In checkout / queue'
+  } catch (error) {
+    fox.status = 'error'
+    fox.error = error instanceof Error ? error.message : String(error)
+    fox.statusLabel = 'Error'
+  } finally {
+    fox.navigating = false
+    pausedIds.delete(fox.id)
+    emitUpdate()
+  }
+}
+
 async function handle(msg) {
   const { requestId, cmd } = msg
   try {
@@ -489,11 +609,14 @@ async function handle(msg) {
       if (target) {
         await Promise.allSettled([...instances.values()].map((fox) => navigate(fox, target)))
       }
+    } else if (cmd === 'rushCheckout') {
+      await Promise.allSettled([...instances.values()].map((fox) => rushCheckoutFox(fox)))
     } else if (cmd === 'reload') {
       const fox = instances.get(msg.foxId)
       if (fox) {
         fox.navigating = true
         fox.status = 'loading'
+        fox.statusLabel = 'Loading'
         try {
           await fox.page.reload({ waitUntil: 'domcontentloaded' })
           fox.error = undefined

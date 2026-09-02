@@ -9,6 +9,8 @@ type Props = {
   driveAll: boolean
   onUrl: (value: string) => void
   onSendAll: (event: FormEvent) => void
+  onRushCheckout: () => void
+  rushing: boolean
   onScaleTo: (count: number) => void
   onToggleMute: () => void
   onToggleDriveAll: () => void
@@ -23,6 +25,8 @@ export default function FleetBar({
   driveAll,
   onUrl,
   onSendAll,
+  onRushCheckout,
+  rushing,
   onScaleTo,
   onToggleMute,
   onToggleDriveAll,
@@ -66,6 +70,15 @@ export default function FleetBar({
         />
         <button className="btn primary" type="submit">
           Send all
+        </button>
+        <button
+          className="btn rush"
+          type="button"
+          disabled={rushing || count === 0}
+          title="Add to cart, proceed to checkout, continue as guest, wait in queue"
+          onClick={onRushCheckout}
+        >
+          {rushing ? 'Rushing…' : 'Cart & queue'}
         </button>
       </form>
       <div className="top-actions">
