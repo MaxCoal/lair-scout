@@ -133,7 +133,7 @@ export async function placeFoxWindow(
   opts: { pid?: number; hwnd?: number; title?: string; owner?: number },
   rect: { x: number; y: number; width: number; height: number }
 ): Promise<number> {
-  return controlWindow({ action: 'place', taskbar: false, topmost: true, ...opts, ...rect })
+  return controlWindow({ action: 'place', taskbar: false, topmost: false, ...opts, ...rect })
 }
 
 export function stopWin32Host(): void {

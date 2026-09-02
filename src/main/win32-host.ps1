@@ -23,6 +23,12 @@ public struct FoxRect {
   public int Bottom;
 }
 
+[StructLayout(LayoutKind.Sequential)]
+public struct FoxPoint {
+  public int X;
+  public int Y;
+}
+
 public static class FoxBoxNative {
   public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
   [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
@@ -39,6 +45,10 @@ public static class FoxBoxNative {
   [DllImport("user32.dll")] public static extern int GetWindowLong(IntPtr hWnd, int nIndex);
   [DllImport("user32.dll")] public static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
   [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")] public static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
+  [DllImport("user32.dll")] public static extern IntPtr SetParent(IntPtr hWndChild, IntPtr hWndNewParent);
+  [DllImport("user32.dll")] public static extern bool ScreenToClient(IntPtr hWnd, ref FoxPoint lpPoint);
+  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+  [DllImport("shcore.dll")] public static extern int SetProcessDpiAwareness(int value);
 
   static IFoxTaskbarList taskbar;
 
@@ -101,8 +111,62 @@ public static class FoxBoxNative {
     return found;
   }
 
+  public static void MakeDpiAware() {
+    try { SetProcessDpiAwareness(2); }
+    catch {
+      try { SetProcessDPIAware(); } catch {}
+    }
+  }
+
   public static void SetOwner(IntPtr hwnd, IntPtr owner) {
     SetWindowLongPtr(hwnd, -8, owner);
+  }
+
+  public static void SetEmbedded(IntPtr hwnd, bool embedded) {
+    const int GWL_STYLE = -16;
+    const int WS_CHILD = 0x40000000;
+    const int WS_POPUP = unchecked((int)0x80000000);
+    const int WS_CAPTION = 0x00C00000;
+    const int WS_THICKFRAME = 0x00040000;
+    const int WS_SYSMENU = 0x00080000;
+    const int WS_MINIMIZEBOX = 0x00020000;
+    const int WS_MAXIMIZEBOX = 0x00010000;
+    const int WS_BORDER = 0x00800000;
+    const int WS_VISIBLE = 0x10000000;
+    int style = GetWindowLong(hwnd, GWL_STYLE);
+    if (embedded) {
+      style |= WS_CHILD | WS_VISIBLE;
+      style &= ~(WS_POPUP | WS_CAPTION | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_BORDER);
+    } else {
+      style &= ~WS_CHILD;
+      style |= WS_POPUP | WS_CAPTION | WS_THICKFRAME | WS_SYSMENU | WS_VISIBLE;
+    }
+    SetWindowLong(hwnd, GWL_STYLE, style);
+  }
+
+  public static void EmbedAt(IntPtr hwnd, IntPtr owner, int screenX, int screenY, int w, int h) {
+    if (owner != IntPtr.Zero) SetParent(hwnd, owner);
+    SetEmbedded(hwnd, owner != IntPtr.Zero);
+    SetTaskbar(hwnd, false);
+    int x = screenX;
+    int y = screenY;
+    if (owner != IntPtr.Zero) {
+      FoxPoint p = new FoxPoint();
+      p.X = screenX;
+      p.Y = screenY;
+      ScreenToClient(owner, ref p);
+      x = p.X;
+      y = p.Y;
+    }
+    ShowWindow(hwnd, 8);
+    SetWindowPos(hwnd, IntPtr.Zero, x, y, w, h, 0x0040 | 0x0020);
+  }
+
+  public static void Detach(IntPtr hwnd, IntPtr ownerKeep) {
+    SetEmbedded(hwnd, false);
+    SetParent(hwnd, IntPtr.Zero);
+    if (ownerKeep != IntPtr.Zero) SetOwner(hwnd, ownerKeep);
+    else SetOwner(hwnd, IntPtr.Zero);
   }
 
   public static void SetFrame(IntPtr hwnd, bool chrome) {
@@ -139,6 +203,8 @@ public static class FoxBoxNative {
   }
 }
 "@
+
+[void][FoxBoxNative]::MakeDpiAware()
 
 $SWP_NOZORDER = 0x0004
 $SWP_NOACTIVATE = 0x0010
@@ -201,25 +267,27 @@ function Invoke-FoxAction($cmd) {
     if ($action -eq "find") {
       return $raw
     } elseif ($action -eq "hide") {
-    [FoxBoxNative]::SetOwner($hwnd, [IntPtr]$owner)
+    [FoxBoxNative]::Detach($hwnd, [IntPtr]$owner)
     [FoxBoxNative]::SetTaskbar($hwnd, $false)
     [FoxBoxNative]::SetFrame($hwnd, $true)
     [void][FoxBoxNative]::ShowWindow($hwnd, 8)
     [void][FoxBoxNative]::SetWindowPos($hwnd, $HWND_NOTOPMOST, -32000, -32000, 1280, 720, ($SWP_NOACTIVATE -bor $SWP_SHOWWINDOW -bor $SWP_FRAMECHANGED))
   } elseif ($action -eq "show") {
-    [FoxBoxNative]::SetOwner($hwnd, [IntPtr]::Zero)
+    [FoxBoxNative]::Detach($hwnd, [IntPtr]::Zero)
     [FoxBoxNative]::SetFrame($hwnd, $true)
     [FoxBoxNative]::SetTaskbar($hwnd, $true)
     [void][FoxBoxNative]::SetWindowPos($hwnd, $HWND_NOTOPMOST, 80, 80, 1280, 720, ($SWP_SHOWWINDOW -bor $SWP_FRAMECHANGED))
     [void][FoxBoxNative]::ShowWindow($hwnd, 8)
     [void][FoxBoxNative]::SetForegroundWindow($hwnd)
   } elseif ($action -eq "place") {
-    [FoxBoxNative]::SetOwner($hwnd, [IntPtr]$owner)
-    [FoxBoxNative]::SetTaskbar($hwnd, $false)
-    [FoxBoxNative]::SetFrame($hwnd, $false)
-    $z = if ($topmost) { $HWND_TOPMOST } else { $HWND_TOP }
-    [void][FoxBoxNative]::ShowWindow($hwnd, 8)
-    [void][FoxBoxNative]::SetWindowPos($hwnd, $z, $x, $y, $w, $h, ($SWP_SHOWWINDOW -bor $SWP_FRAMECHANGED -bor $SWP_NOACTIVATE))
+    if ($cmd.pid -and ([uint32]$cmd.pid -ne 0)) {
+      $top = [FoxBoxNative]::FindBestByPids(@([uint32]$cmd.pid))
+      if ($top -ne 0) {
+        $raw = $top
+        $hwnd = [IntPtr]$raw
+      }
+    }
+    [FoxBoxNative]::EmbedAt($hwnd, [IntPtr]$owner, $x, $y, $w, $h)
   }
 
   return $raw
