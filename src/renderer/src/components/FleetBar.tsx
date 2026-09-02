@@ -15,6 +15,7 @@ type Props = {
   onToggleMute: () => void
   onToggleDriveAll: () => void
   onOpenDriveWindow: () => void
+  onOpenSettings: () => void
 }
 
 export default function FleetBar({
@@ -30,7 +31,8 @@ export default function FleetBar({
   onScaleTo,
   onToggleMute,
   onToggleDriveAll,
-  onOpenDriveWindow
+  onOpenDriveWindow,
+  onOpenSettings
 }: Props) {
   const [draft, setDraft] = useState(String(count))
   const editing = useRef(false)
@@ -127,6 +129,9 @@ export default function FleetBar({
             Drive window
           </button>
         ) : null}
+        <button className="btn ghost" type="button" onClick={onOpenSettings}>
+          Settings
+        </button>
         <button className={`btn ghost ${muted ? 'active' : ''}`} type="button" onClick={onToggleMute}>
           {muted ? 'Alerts off' : 'Alerts on'}
         </button>

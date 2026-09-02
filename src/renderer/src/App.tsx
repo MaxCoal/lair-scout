@@ -5,6 +5,7 @@ import Sidebar from './components/Sidebar'
 import InstanceGrid from './components/InstanceGrid'
 import FocusView from './components/FocusView'
 import DrivePad from './components/DrivePad'
+import SettingsModal from './components/SettingsModal'
 
 const DEFAULT_URL = 'https://secretlair.wizards.com/us'
 const IS_DRIVE_PAD = window.location.hash === '#drive'
@@ -33,6 +34,7 @@ export default function App() {
   const [driveAll, setDriveAll] = useState(false)
   const [ram, setRam] = useState<RamSnapshot | null>(null)
   const [rushing, setRushing] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   useEffect(() => {
     return window.foxbox.onRam(setRam)
@@ -149,7 +151,9 @@ export default function App() {
           })
         }}
         onOpenDriveWindow={() => window.foxbox.openDriveWindow()}
+        onOpenSettings={() => setSettingsOpen(true)}
       />
+      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <div className="workspace">
         <Sidebar
           instances={instances}

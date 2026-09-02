@@ -26,6 +26,7 @@ let focusedId = null
 let shuttingDown = false
 let ticking = false
 let spawning = false
+let shippingProfile = { name: '', address: '' }
 
 function send(message) {
   process.stdout.write(`${JSON.stringify(message)}\n`)
@@ -310,6 +311,122 @@ function getBrowserPid(context) {
   }
 }
 
+function parseAddress(profile) {
+  const name = String(profile?.name || '').trim()
+  const raw = String(profile?.address || '').trim()
+  const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+  const bits = name.split(/\s+/).filter(Boolean)
+  let street = lines[0] || raw
+  let street2 = ''
+  let city = ''
+  let state = ''
+  let zip = ''
+  const last = lines[lines.length - 1] || ''
+  const cityStateZip = last.match(/^(.+?),\s*([A-Za-z]{2})\s+(\d{5}(?:-\d{4})?)$/)
+  if (cityStateZip) {
+    city = cityStateZip[1]
+    state = cityStateZip[2].toUpperCase()
+    zip = cityStateZip[3]
+    if (lines.length === 1) {
+      street = last.slice(0, last.length - cityStateZip[0].length).replace(/,\s*$/, '').trim() || street
+    } else {
+      street = lines[0]
+      if (lines.length > 2) street2 = lines.slice(1, -1).join(', ')
+    }
+  } else if (lines.length > 1) {
+    street2 = lines.slice(1).join(', ')
+  }
+  return {
+    name,
+    firstName: bits[0] || '',
+    lastName: bits.slice(1).join(' ') || '',
+    street,
+    street2,
+    city,
+    state,
+    zip,
+    address: raw
+  }
+}
+
+function fillProfileInPage(data) {
+  if (!data || (!data.name && !data.street && !data.address)) return 0
+  const setValue = (el, value) => {
+    if (!el || !value || el.disabled || el.readOnly) return false
+    if (document.activeElement === el) return false
+    const tag = el.tagName
+    if (tag === 'SELECT') {
+      const want = String(value).toLowerCase()
+      const opt = [...el.options].find(
+        (item) => item.value.toLowerCase() === want || item.text.toLowerCase() === want || item.value.toLowerCase() === want.slice(0, 2)
+      )
+      if (!opt) return false
+      el.value = opt.value
+    } else {
+      const proto = tag === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+      const desc = Object.getOwnPropertyDescriptor(proto, 'value')
+      if (desc && desc.set) desc.set.call(el, value)
+      else el.value = value
+    }
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+    el.dispatchEvent(new Event('change', { bubbles: true }))
+    return true
+  }
+  const blobOf = (el) =>
+    [el.id, el.name, el.placeholder, el.getAttribute('aria-label'), el.autocomplete, el.getAttribute('ng-model'), el.getAttribute('data-internal-id')]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+  let filled = 0
+  const nodes = [...document.querySelectorAll('input, textarea, select')]
+  for (const el of nodes) {
+    const type = (el.getAttribute('type') || 'text').toLowerCase()
+    if (['hidden', 'checkbox', 'radio', 'password', 'submit', 'button', 'file'].includes(type)) continue
+    const blob = blobOf(el)
+    if (/email/.test(blob)) continue
+    const isFirst = /first[-_\s]?name|given[-_\s]?name/.test(blob)
+    const isLast = /last[-_\s]?name|family[-_\s]?name|surname/.test(blob)
+    const isFullName =
+      /full[-_\s]?name|customer[-_\s]?name|shipping[-_\s]?name|ship[-_\s]?name|billing[-_\s]?name/.test(blob) ||
+      el.autocomplete === 'name' ||
+      /^(name|full_name|fullname|shipping_name|billing_name)$/i.test(el.name || el.id || '')
+    if (isFirst && data.firstName) filled += setValue(el, data.firstName) ? 1 : 0
+    else if (isLast && data.lastName) filled += setValue(el, data.lastName) ? 1 : 0
+    else if (isFullName && !/user|login|account|company|card/.test(blob) && data.name) filled += setValue(el, data.name) ? 1 : 0
+    else if (/address[-_\s]?(line[-_\s]?)?2|address2|apt|suite|unit/.test(blob) && data.street2) filled += setValue(el, data.street2) ? 1 : 0
+    else if (/street|address[-_\s]?(line[-_\s]?)?1|address1|(^|[-_\s])address($|[-_\s])/.test(blob) && data.street)
+      filled += setValue(el, data.street) ? 1 : 0
+    else if (/city|town|locality/.test(blob) && data.city) filled += setValue(el, data.city) ? 1 : 0
+    else if (/state|province|region/.test(blob) && data.state) filled += setValue(el, data.state) ? 1 : 0
+    else if (/zip|postal|postcode/.test(blob) && data.zip) filled += setValue(el, data.zip) ? 1 : 0
+  }
+  return filled
+}
+
+async function applyShippingToFox(fox) {
+  const page = pageOf(fox)
+  if (!page || (!shippingProfile.name && !shippingProfile.address)) return
+  await page.evaluate(fillProfileInPage, parseAddress(shippingProfile)).catch(() => 0)
+}
+
+function hookProfile(fox) {
+  if (fox.profileHooked) return
+  fox.profileHooked = true
+  const attach = (page) => {
+    page.on('domcontentloaded', () => {
+      void applyShippingToFox(fox)
+    })
+    page.on('framenavigated', (frame) => {
+      if (frame === page.mainFrame()) void applyShippingToFox(fox)
+    })
+  }
+  for (const page of fox.context.pages()) attach(page)
+  fox.context.on('page', (page) => {
+    fox.page = page
+    attach(page)
+  })
+}
+
 async function spawnFox(foxId, profileDir) {
   spawning = true
   try {
@@ -367,6 +484,8 @@ async function spawnFox(foxId, profileDir) {
       emitUpdate()
     })
     instances.set(foxId, fox)
+    hookProfile(fox)
+    await applyShippingToFox(fox)
     emitUpdate()
     await page.goto(
       `data:text/html,<html><head><title>FoxBox-${foxId}</title></head><body style="margin:0;background:#0c0d10;color:#e8eaed;font-family:Segoe UI,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh"><div style="text-align:center"><div style="letter-spacing:.2em;text-transform:uppercase;color:#f97316">FoxBox</div><h1>Fox ${foxId}</h1><p style="color:#8b919a">Ready. Use Send all to navigate.</p></div></body></html>`,
@@ -616,6 +735,9 @@ async function runRushCheckout(fox, page) {
     throw new Error('Could not find Continue as guest')
   }
 
+  await wait(600)
+  await page.evaluate(fillProfileInPage, parseAddress(shippingProfile)).catch(() => 0)
+
   setRushLabel(fox, 'Waiting in queue…')
   await page.waitForURL(/storequeue\.wizards\.com|queue-it\.net|queueittoken=/i, { timeout: 60000 }).catch(() => undefined)
 }
@@ -657,6 +779,12 @@ async function handle(msg) {
       }
     } else if (cmd === 'rushCheckout') {
       await Promise.allSettled([...instances.values()].map((fox) => rushCheckoutFox(fox)))
+    } else if (cmd === 'setProfile') {
+      shippingProfile = {
+        name: String(msg.profile?.name || ''),
+        address: String(msg.profile?.address || '')
+      }
+      await Promise.allSettled([...instances.values()].map((fox) => applyShippingToFox(fox)))
     } else if (cmd === 'reload') {
       const fox = instances.get(msg.foxId)
       if (fox) {

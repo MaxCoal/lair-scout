@@ -6,7 +6,8 @@ import type {
   KeyPayload,
   MovePayload,
   RamSnapshot,
-  ScrollPayload
+  ScrollPayload,
+  ShippingProfile
 } from '@shared/types'
 
 const api: FoxboxAPI = {
@@ -38,6 +39,8 @@ const api: FoxboxAPI = {
   closeDriveWindow: () => ipcRenderer.invoke('drive:close'),
   setMuted: (muted) => ipcRenderer.invoke('alerts:setMuted', muted),
   setFocused: (id) => ipcRenderer.invoke('instances:setFocused', id),
+  getSettings: () => ipcRenderer.invoke('settings:get'),
+  saveSettings: (profile: ShippingProfile) => ipcRenderer.invoke('settings:save', profile),
   onUpdate: (cb) => {
     const listener = (_event: unknown, instances: InstanceSnapshot[]): void => cb(instances)
     ipcRenderer.on('instances:update', listener)

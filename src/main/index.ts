@@ -2,6 +2,7 @@ import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { firefoxManager } from './firefoxManager'
+import type { ShippingProfile } from '@shared/types'
 
 let quitting = false
 let mainWindow: BrowserWindow | null = null
@@ -125,6 +126,8 @@ function registerIpc(): void {
   })
   ipcMain.handle('alerts:setMuted', (_event, muted: boolean) => firefoxManager.setMuted(muted))
   ipcMain.handle('instances:setFocused', (_event, id: string | null) => firefoxManager.setFocused(id))
+  ipcMain.handle('settings:get', () => firefoxManager.getSettings())
+  ipcMain.handle('settings:save', (_event, profile: ShippingProfile) => firefoxManager.saveProfile(profile))
 }
 
 app.whenReady().then(async () => {

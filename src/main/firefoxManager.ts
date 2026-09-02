@@ -3,9 +3,10 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { join } from 'node:path'
-import type { InstanceSnapshot, RamSnapshot } from '@shared/types'
+import type { InstanceSnapshot, RamSnapshot, ShippingProfile } from '@shared/types'
 import { findFoxWindow, hideFoxWindow, moveFoxWindow, placeFoxWindow, setClipChildren, showWindow, stopWin32Host } from './win32'
 import { readRam } from './memory'
+import { loadSettings, saveSettings } from './settings'
 
 const DEFAULT_COUNT = 2
 const MAX_FLEET = 20
@@ -31,6 +32,7 @@ export class FirefoxManager {
   private windows = new Map<string, WindowState>()
   private muted = false
   private shuttingDown = false
+  private shipping: ShippingProfile = { name: '', address: '' }
   private dockTimer: NodeJS.Timeout | null = null
   private interactTimer: NodeJS.Timeout | null = null
   private ramTimer: NodeJS.Timeout | null = null
@@ -50,12 +52,31 @@ export class FirefoxManager {
     this.armDockTimer()
     this.armInteractTimer()
     this.armRamTimer()
+    void loadSettings().then((profile) => {
+      this.shipping = profile
+      void this.pushProfile()
+    })
     window.on('move', () => {
       void this.relayoutInteract()
     })
     window.on('resize', () => {
       void this.relayoutInteract()
     })
+  }
+
+  getSettings(): ShippingProfile {
+    return this.shipping
+  }
+
+  async saveProfile(profile: ShippingProfile): Promise<ShippingProfile> {
+    this.shipping = await saveSettings(profile)
+    await this.pushProfile()
+    return this.shipping
+  }
+
+  private async pushProfile(): Promise<void> {
+    if (!this.worker) return
+    await this.call('setProfile', { profile: this.shipping }).catch(() => undefined)
   }
 
   setMuted(muted: boolean): void {
@@ -454,6 +475,7 @@ export class FirefoxManager {
 
     if (message.type === 'event' && message.event === 'ready') {
       this.markReady()
+      void this.pushProfile()
       return
     }
 

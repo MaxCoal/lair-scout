@@ -61,6 +61,11 @@ export type RamSnapshot = {
   foxboxLabel: string
 }
 
+export type ShippingProfile = {
+  name: string
+  address: string
+}
+
 export type FoxboxAPI = {
   spawn: () => Promise<void>
   scaleTo: (count: number) => Promise<void>
@@ -82,6 +87,8 @@ export type FoxboxAPI = {
   closeDriveWindow: () => Promise<void>
   setMuted: (muted: boolean) => Promise<void>
   setFocused: (id: string | null) => Promise<void>
+  getSettings: () => Promise<ShippingProfile>
+  saveSettings: (profile: ShippingProfile) => Promise<ShippingProfile>
   onUpdate: (cb: (instances: InstanceSnapshot[]) => void) => () => void
   onAdmitted: (cb: (id: string) => void) => () => void
   onQueuePopped: (cb: (id: string) => void) => () => void
