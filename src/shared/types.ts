@@ -7,6 +7,13 @@ export type SessionStatus =
   | 'admitted'
   | 'error'
 
+export type QueueNotice = {
+  id: string
+  header: string
+  time: string
+  text: string
+}
+
 export type InstanceSnapshot = {
   id: string
   url: string
@@ -16,6 +23,7 @@ export type InstanceSnapshot = {
   statusLabel: string
   waitTime?: string
   queueNumber?: string
+  queueNotice?: QueueNotice
   screenshot?: string
   interacting: boolean
   poppedOut: boolean
@@ -96,5 +104,6 @@ export type FoxboxAPI = {
   onUpdate: (cb: (instances: InstanceSnapshot[]) => void) => () => void
   onAdmitted: (cb: (id: string) => void) => () => void
   onQueuePopped: (cb: (id: string) => void) => () => void
+  onQueueMessage: (cb: (payload: { foxId: string; notice: QueueNotice }) => void) => () => void
   onRam: (cb: (ram: RamSnapshot) => void) => () => void
 }

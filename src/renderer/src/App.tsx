@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import type { InstanceSnapshot, RamSnapshot } from '@shared/types'
+import type { InstanceSnapshot, QueueNotice, RamSnapshot } from '@shared/types'
 import FleetBar from './components/FleetBar'
 import Sidebar from './components/Sidebar'
 import InstanceGrid from './components/InstanceGrid'
 import FocusView from './components/FocusView'
 import DrivePad from './components/DrivePad'
 import SettingsModal from './components/SettingsModal'
+import QueueNoticeBox from './components/QueueNoticeBox'
 import { nextFoxSort, sortFoxes, type FoxSort } from './sortFoxes'
 
 const DEFAULT_URL = 'https://secretlair.wizards.com/us'
@@ -37,6 +38,7 @@ export default function App() {
   const [rushing, setRushing] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [foxSort, setFoxSort] = useState<FoxSort>('id')
+  const [dismissedNotices, setDismissedNotices] = useState<string[]>([])
 
   useEffect(() => {
     return window.foxbox.onRam(setRam)
@@ -55,6 +57,15 @@ export default function App() {
   useEffect(() => {
     return window.foxbox.onQueuePopped(() => {
       if (!muted) playTone(392, 784)
+    })
+  }, [muted])
+
+  useEffect(() => {
+    return window.foxbox.onQueueMessage(() => {
+      if (!muted) {
+        playTone(523, 784)
+        window.setTimeout(() => playTone(784, 1046), 180)
+      }
     })
   }, [muted])
 
@@ -97,6 +108,19 @@ export default function App() {
   )
 
   const sorted = useMemo(() => sortFoxes(instances, foxSort), [instances, foxSort])
+
+  const queueNotices = useMemo(() => {
+    const hidden = new Set(dismissedNotices)
+    const byId = new Map<string, QueueNotice>()
+    for (const fox of instances) {
+      const notice = fox.queueNotice
+      if (!notice?.text) continue
+      const key = notice.id || notice.text
+      if (hidden.has(key) || byId.has(key)) continue
+      byId.set(key, notice)
+    }
+    return [...byId.values()]
+  }, [instances, dismissedNotices])
 
   const sendAll = (event: FormEvent): void => {
     event.preventDefault()
@@ -173,6 +197,15 @@ export default function App() {
           }}
         />
         <main className="main">
+          {queueNotices.map((notice) => (
+            <QueueNoticeBox
+              key={notice.id || notice.text}
+              notice={notice}
+              onDismiss={() =>
+                setDismissedNotices((ids) => [...ids, notice.id || notice.text])
+              }
+            />
+          ))}
           {instances.length >= 6 ? (
             <p className="warn">Each Chromium uses a lot of RAM. Scale down if the machine starts swapping.</p>
           ) : null}

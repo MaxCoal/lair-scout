@@ -52,7 +52,7 @@ export class FirefoxManager {
   private stageRect: StageRect | null = null
   private strayDone: Promise<void>
   private markStrayDone: () => void = () => undefined
-  private strayState: 'pending' | 'cleaning' | 'done' = 'pending'
+  private seenNotices = new Set<string>()
 
   constructor() {
     this.strayDone = new Promise((resolve) => {
@@ -549,6 +549,27 @@ export class FirefoxManager {
       return
     }
 
+    if (message.type === 'event' && message.event === 'queueMessage') {
+      const payload = message.payload as { foxId?: string; notice?: { id?: string; header?: string; time?: string; text?: string } }
+      const notice = payload?.notice
+      const text = String(notice?.text || '').trim()
+      if (!text) return
+      const key = String(notice?.id || text)
+      if (this.seenNotices.has(key)) return
+      this.seenNotices.add(key)
+      const title = notice?.time ? `Queue message · ${notice.time}` : 'Queue message'
+      this.emitNotice('instances:queueMessage', String(payload.foxId || foxId), title, text, {
+        foxId: String(payload.foxId || foxId),
+        notice: {
+          id: key,
+          header: String(notice?.header || 'Message'),
+          time: String(notice?.time || ''),
+          text
+        }
+      })
+      return
+    }
+
     if (message.type === 'event' && message.event === 'admitted') {
       const id = String(message.payload)
       this.emitAlert('instances:admitted', id, `Fox ${id} is through the queue`)
@@ -600,6 +621,21 @@ export class FirefoxManager {
     }
     if (!this.muted && Notification.isSupported()) {
       new Notification({ title: 'FoxBox', body }).show()
+    }
+  }
+
+  private emitNotice(
+    channel: string,
+    id: string,
+    title: string,
+    body: string,
+    payload: unknown
+  ): void {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send(channel, payload)
+    }
+    if (!this.muted && Notification.isSupported()) {
+      new Notification({ title: `FoxBox · ${title}`, body: body.slice(0, 240) }).show()
     }
   }
 

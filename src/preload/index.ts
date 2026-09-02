@@ -5,6 +5,7 @@ import type {
   InstanceSnapshot,
   KeyPayload,
   MovePayload,
+  QueueNotice,
   RamSnapshot,
   ScrollPayload,
   ShippingProfile
@@ -60,6 +61,16 @@ const api: FoxboxAPI = {
     ipcRenderer.on('instances:queuePopped', listener)
     return () => {
       ipcRenderer.removeListener('instances:queuePopped', listener)
+    }
+  },
+  onQueueMessage: (cb) => {
+    const listener = (
+      _event: unknown,
+      payload: { foxId: string; notice: QueueNotice }
+    ): void => cb(payload)
+    ipcRenderer.on('instances:queueMessage', listener)
+    return () => {
+      ipcRenderer.removeListener('instances:queueMessage', listener)
     }
   },
   onRam: (cb) => {

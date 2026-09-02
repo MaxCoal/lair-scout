@@ -345,6 +345,32 @@ input {
   font-size: 13px;
 }
 
+.queue-notice {
+  margin: 0 0 12px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: #12141a;
+  border: 1px solid rgba(251, 191, 36, 0.45);
+  box-shadow: 0 0 24px rgba(251, 191, 36, 0.08);
+}
+
+.queue-notice-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  color: #fde68a;
+  font-size: 13px;
+}
+
+.queue-notice p {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));

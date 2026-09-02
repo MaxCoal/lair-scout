@@ -97,7 +97,11 @@ function mergeExtract(parts) {
     pageId: '',
     bodyClass: '',
     isBeforeOrIdle: null,
-    queueState: null
+    queueState: null,
+    messageId: '',
+    messageHeader: '',
+    messageTime: '',
+    messageText: ''
   }
   for (const part of parts) {
     if (!part) continue
@@ -109,6 +113,12 @@ function mergeExtract(parts) {
     if (!merged.bodyClass && part.bodyClass) merged.bodyClass = part.bodyClass
     if (merged.isBeforeOrIdle == null && part.isBeforeOrIdle != null) merged.isBeforeOrIdle = part.isBeforeOrIdle
     if (merged.queueState == null && part.queueState != null) merged.queueState = part.queueState
+    if (!merged.messageText && part.messageText) {
+      merged.messageId = part.messageId || ''
+      merged.messageHeader = part.messageHeader || ''
+      merged.messageTime = part.messageTime || ''
+      merged.messageText = part.messageText
+    }
   }
   return merged
 }
@@ -157,8 +167,34 @@ async function extractFrame(frame) {
           ''
       )
     }
+    const rawMsg = unwrap(vm?.message)
+    let messageId = ''
+    let messageHeader = ''
+    let messageTime = ''
+    let messageText = ''
+    if (rawMsg && typeof rawMsg === 'object') {
+      messageId = String(unwrap(rawMsg.id) || '')
+      messageHeader = String(unwrap(rawMsg.header) || '').trim()
+      messageText = String(unwrap(rawMsg.text) || '').trim()
+      const stamp = String(unwrap(rawMsg.timestampFormatted) || '').replace(/\u202f/g, ' ').trim()
+      const zone = String(unwrap(rawMsg.timeZonePostfix) || '').trim()
+      messageTime = [stamp, zone].filter(Boolean).join(' ')
+    }
+    if (!messageText) {
+      messageText = pick(['#MainPart_pMessageOnQueueTicket'])
+      if (messageText) {
+        messageHeader = messageHeader || pick(['#MainPart_h2MessageOnQueueTicket'])
+        const stamp = pick(['#MainPart_h2MessageOnQueueTicketTimeText']).replace(/\u202f/g, ' ')
+        const zone = pick(['#MainPart_h2MessageOnQueueTicketTimeTextTimeZonePostfix'])
+        messageTime = messageTime || [stamp, zone].filter(Boolean).join(' ')
+      }
+    }
     return {
       ...fromVm,
+      messageId,
+      messageHeader,
+      messageTime,
+      messageText,
       hasQueueUi: Boolean(
         vm ||
           document.querySelector('#queueit_overlay') ||
@@ -170,6 +206,26 @@ async function extractFrame(frame) {
       inner: document.body?.innerText?.slice(0, 12000) ?? ''
     }
   })
+}
+
+function cleanNoticeText(text) {
+  return String(text || '')
+    .replace(/\u202f/g, ' ')
+    .replace(/\r/g, '')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+function toQueueNotice(extracted) {
+  const text = cleanNoticeText(extracted.messageText)
+  if (!text) return undefined
+  const header = String(extracted.messageHeader || 'Message').trim()
+  const time = String(extracted.messageTime || '')
+    .replace(/\u202f/g, ' ')
+    .trim()
+  const id = String(extracted.messageId || `${header}|${time}|${text}`).trim()
+  return { id, header, time, text }
 }
 
 async function inspectPage(page, previous, wasInQueue) {
@@ -246,6 +302,7 @@ async function inspectPage(page, previous, wasInQueue) {
     status,
     waitTime: waitTime || undefined,
     queueNumber: extracted.queueNumber || undefined,
+    queueNotice: toQueueNotice(extracted),
     host,
     url,
     title,
@@ -285,6 +342,7 @@ function snapshot(fox) {
     statusLabel: fox.statusLabel || statusLabel(fox.status, fox.waitTime),
     waitTime: fox.waitTime,
     queueNumber: fox.queueNumber,
+    queueNotice: fox.queueNotice,
     screenshot: fox.screenshot,
     error: fox.error,
     admittedFlash: Date.now() < fox.admittedFlashUntil,
@@ -578,6 +636,14 @@ async function inspectFox(fox) {
   fox.host = read.host
   fox.title = read.title
   fox.error = read.status === 'error' ? fox.error || 'Could not read page' : undefined
+  const notice = read.queueNotice
+  fox.queueNotice = notice
+  const noticeKey = notice?.id || ''
+  if (notice && noticeKey !== fox.lastNoticeId) {
+    fox.lastNoticeId = noticeKey
+    send({ type: 'event', event: 'queueMessage', payload: { foxId: fox.id, notice } })
+  }
+  if (!notice) fox.lastNoticeId = ''
   if (isQueuePopEdge(previous, fox.status)) {
     send({ type: 'event', event: 'queuePopped', payload: fox.id })
   }
