@@ -524,24 +524,63 @@ function scriptClickAdd() {
 }
 
 function scriptClickProceed() {
-  const named = document.querySelector('[aria-label="Proceed to Cart"], #minicart button[sf-checkout], a.view-cart, a[sf-checkout].btn-primary')
-  const byText = [...document.querySelectorAll('button, a')].find((el) =>
-    /proceed to cart|view cart|^checkout$/i.test((el.innerText || '').replace(/\s+/g, ' ').trim())
-  )
-  const el = named || byText
-  if (!el) {
-    const mini = document.querySelector('#minicart-button')
-    if (mini) {
-      mini.click()
-      return false
+  function shown(el) {
+    if (!el) return false
+    const r = el.getBoundingClientRect()
+    if (r.width < 8 || r.height < 8) return false
+    if (r.bottom < 0 || r.right < 0 || r.top > innerHeight || r.left > innerWidth) return false
+    let node = el
+    while (node && node.nodeType === 1) {
+      const s = getComputedStyle(node)
+      if (s.display === 'none' || s.visibility === 'hidden' || Number(s.opacity) === 0) return false
+      node = node.parentElement
     }
-    return false
+    return true
   }
-  const r = el.getBoundingClientRect()
-  const s = getComputedStyle(el)
-  if (r.width < 8 || s.display === 'none' || s.visibility === 'hidden') return false
-  el.click()
-  return true
+  function fire(el) {
+    el.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true, view: window }))
+    el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }))
+    el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }))
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }))
+    el.click()
+  }
+
+  const toast = document.querySelector('#custom-cart-toast')
+  if (toast && shown(toast)) {
+    const btn = toast.querySelector('button.view-cart, [sf-checkout], button, a')
+    if (btn && shown(btn)) {
+      fire(btn)
+      return true
+    }
+  }
+
+  const labeled = [
+    ...document.querySelectorAll(
+      '[aria-label="Proceed to Cart"], button.view-cart, a.view-cart, #minicart button[sf-checkout], button[sf-checkout], a[sf-checkout]'
+    )
+  ]
+  const byText = [...document.querySelectorAll('button, a')].filter((el) =>
+    /proceed to cart|view cart/i.test((el.innerText || el.getAttribute('aria-label') || '').replace(/\s+/g, ' '))
+  )
+  const visible = [...labeled, ...byText].filter(shown)
+  if (visible.length) {
+    visible.sort((a, b) => {
+      const ar = a.getBoundingClientRect()
+      const br = b.getBoundingClientRect()
+      return ar.top - br.top || ar.left - br.left
+    })
+    fire(visible[0])
+    return true
+  }
+
+  const wrap = document.querySelector('.minicart-container')
+  const mini = document.querySelector('#minicart-button')
+  if (wrap && !wrap.classList.contains('open')) wrap.classList.add('open')
+  if (mini) {
+    mini.setAttribute('aria-expanded', 'true')
+    fire(mini)
+  }
+  return false
 }
 
 function scriptClickGuest() {
@@ -564,6 +603,7 @@ async function runRushCheckout(fox, page) {
   }
 
   setRushLabel(fox, 'Proceeding to cart…')
+  await wait(400)
   if (!(await clickByScript(page, scriptClickProceed, 16000))) {
     throw new Error('Could not find Proceed to Cart')
   }
