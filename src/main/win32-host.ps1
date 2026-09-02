@@ -178,7 +178,14 @@ public static class FoxBoxNative {
       x = p.X;
       y = p.Y;
     }
-    SetWindowPos(hwnd, IntPtr.Zero, x, y, w, h, 0x0004 | 0x0010);
+    uint flags = 0x0004 | 0x0010;
+    FoxRect cur;
+    if (GetWindowRect(hwnd, out cur)) {
+      int curW = cur.Right - cur.Left;
+      int curH = cur.Bottom - cur.Top;
+      if (Math.Abs(curW - w) < 4 && Math.Abs(curH - h) < 4) flags |= 0x0001;
+    }
+    SetWindowPos(hwnd, IntPtr.Zero, x, y, w, h, flags);
   }
 
   public static void SetClipChildren(IntPtr hwnd, bool clip) {

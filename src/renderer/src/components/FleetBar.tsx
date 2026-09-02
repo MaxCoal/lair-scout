@@ -167,7 +167,7 @@ export default function FleetBar({
           <button className="btn ghost" type="button" onClick={onOpenSettings}>
             Settings
           </button>
-          <button className={`btn ghost ${muted ? 'active' : ''}`} type="button" onClick={onToggleMute}>
+          <button className={`btn ghost ${muted ? '' : 'alerts-on'}`} type="button" onClick={onToggleMute}>
             {muted ? 'Alerts off' : 'Alerts on'}
           </button>
         </div>

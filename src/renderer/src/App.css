@@ -237,6 +237,12 @@ input {
   color: #fdba74;
 }
 
+.btn.ghost.alerts-on {
+  background: rgba(52, 211, 153, 0.16);
+  border-color: rgba(52, 211, 153, 0.55);
+  color: #6ee7b7;
+}
+
 .btn.danger:hover {
   border-color: rgba(248, 113, 113, 0.5);
   color: #fecaca;
@@ -323,6 +329,11 @@ input {
   min-height: 0;
   padding: 16px;
   overflow: auto;
+}
+
+.main.locked {
+  overflow: hidden;
+  overflow-anchor: none;
 }
 
 .hint {
@@ -524,7 +535,8 @@ input {
 }
 
 .focus-stage.live {
-  min-height: 420px;
+  min-height: 0;
+  height: 100%;
   background: #07080a;
 }
 

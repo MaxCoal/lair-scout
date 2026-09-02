@@ -23,6 +23,7 @@ export default function FocusView({ fox, driveAll, fleetCount, live, onBack, onR
   useEffect(() => {
     if (!live) return undefined
     const last = { x: 0, y: 0, width: 0, height: 0 }
+    let timer = 0
     const report = (): void => {
       const el = stageRef.current
       if (!el) return
@@ -34,10 +35,10 @@ export default function FocusView({ fox, driveAll, fleetCount, live, onBack, onR
         height: Math.round(rect.height)
       }
       if (
-        next.x === last.x &&
-        next.y === last.y &&
-        next.width === last.width &&
-        next.height === last.height
+        Math.abs(next.x - last.x) < 2 &&
+        Math.abs(next.y - last.y) < 2 &&
+        Math.abs(next.width - last.width) < 4 &&
+        Math.abs(next.height - last.height) < 4
       ) {
         return
       }
@@ -47,14 +48,18 @@ export default function FocusView({ fox, driveAll, fleetCount, live, onBack, onR
       last.height = next.height
       void window.foxbox.interact(fox.id, next)
     }
+    const schedule = (): void => {
+      window.clearTimeout(timer)
+      timer = window.setTimeout(report, 50)
+    }
     report()
-    requestAnimationFrame(() => requestAnimationFrame(report))
-    const observer = new ResizeObserver(report)
+    const observer = new ResizeObserver(schedule)
     if (stageRef.current) observer.observe(stageRef.current)
-    window.addEventListener('resize', report)
+    window.addEventListener('resize', schedule)
     return () => {
+      window.clearTimeout(timer)
       observer.disconnect()
-      window.removeEventListener('resize', report)
+      window.removeEventListener('resize', schedule)
       void window.foxbox.stopInteract(fox.id)
     }
   }, [fox.id, live])
@@ -132,7 +137,11 @@ export default function FocusView({ fox, driveAll, fleetCount, live, onBack, onR
         tabIndex={0}
         ref={stageRef}
         onWheel={(event) => {
-          if (live) return
+          if (live) {
+            event.preventDefault()
+            event.stopPropagation()
+            return
+          }
           event.preventDefault()
           void window.foxbox.scroll({ id, dx: event.deltaX, dy: event.deltaY })
         }}

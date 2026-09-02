@@ -49,6 +49,8 @@ export class FirefoxManager {
   private dockTimer: NodeJS.Timeout | null = null
   private interactTimer: NodeJS.Timeout | null = null
   private ramTimer: NodeJS.Timeout | null = null
+  private relayoutBusy = false
+  private relayoutQueued = false
   private stageRect: StageRect | null = null
   private strayDone: Promise<void>
   private markStrayDone: () => void = () => undefined
@@ -70,10 +72,10 @@ export class FirefoxManager {
       void this.pushProfile()
     })
     window.on('move', () => {
-      void this.relayoutInteract()
+      this.queueRelayout()
     })
     window.on('resize', () => {
-      void this.relayoutInteract()
+      this.queueRelayout()
     })
   }
 
@@ -339,15 +341,17 @@ export class FirefoxManager {
       width: Math.round(phys.width),
       height: Math.round(phys.height)
     }
-    if (
-      mode === 'move' &&
-      state.lastPhys &&
-      Math.abs(state.lastPhys.x - next.x) < 2 &&
-      Math.abs(state.lastPhys.y - next.y) < 2 &&
-      Math.abs(state.lastPhys.width - next.width) < 2 &&
-      Math.abs(state.lastPhys.height - next.height) < 2
-    ) {
-      return state.hwnd
+    if (state.lastPhys) {
+      const samePos =
+        Math.abs(state.lastPhys.x - next.x) < 2 && Math.abs(state.lastPhys.y - next.y) < 2
+      const sameSize =
+        Math.abs(state.lastPhys.width - next.width) < 4 &&
+        Math.abs(state.lastPhys.height - next.height) < 4
+      if (mode === 'move' && samePos && sameSize) return state.hwnd
+      if (sameSize) {
+        next.width = state.lastPhys.width
+        next.height = state.lastPhys.height
+      }
     }
     const opts = { pid: state.pid, hwnd: state.hwnd, title: `FoxBox-${id}`, owner: this.ownerHwnd() }
     const hwnd = mode === 'place' ? await placeFoxWindow(opts, next) : await moveFoxWindow(opts, next)
@@ -361,12 +365,32 @@ export class FirefoxManager {
     return buf.length >= 8 ? Number(buf.readBigUInt64LE(0)) : buf.readUInt32LE(0)
   }
 
+  private queueRelayout(): void {
+    if (this.relayoutBusy) {
+      this.relayoutQueued = true
+      return
+    }
+    void this.relayoutInteract()
+  }
+
   private async relayoutInteract(): Promise<void> {
-    if (!this.stageRect) return
-    for (const [id, state] of this.windows) {
-      if (!state.interacting) continue
-      const hwnd = await this.placeState(id, state, this.stageRect, 'move')
-      if (hwnd) state.hwnd = hwnd
+    if (!this.stageRect || this.relayoutBusy) {
+      if (this.relayoutBusy) this.relayoutQueued = true
+      return
+    }
+    this.relayoutBusy = true
+    try {
+      for (const [id, state] of this.windows) {
+        if (!state.interacting) continue
+        const hwnd = await this.placeState(id, state, this.stageRect, 'move')
+        if (hwnd) state.hwnd = hwnd
+      }
+    } finally {
+      this.relayoutBusy = false
+      if (this.relayoutQueued) {
+        this.relayoutQueued = false
+        void this.relayoutInteract()
+      }
     }
   }
 
@@ -396,7 +420,7 @@ export class FirefoxManager {
     if (this.interactTimer) return
     this.interactTimer = setInterval(() => {
       if (this.shuttingDown) return
-      void this.relayoutInteract()
+      this.queueRelayout()
     }, 250)
   }
 

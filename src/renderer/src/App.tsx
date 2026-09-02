@@ -200,7 +200,7 @@ export default function App() {
             void window.foxbox.kill(id)
           }}
         />
-        <main className="main">
+        <main className={`main ${focused && liveId === focused.id ? 'locked' : ''}`}>
           {queueNotices.map((notice) => (
             <QueueNoticeBox
               key={`${notice.id}|${notice.text}`}
