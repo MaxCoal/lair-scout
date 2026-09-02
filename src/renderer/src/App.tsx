@@ -177,8 +177,7 @@ export default function App() {
           setDriveAll((value) => {
             const next = !value
             setLiveId(null)
-            if (next) void window.foxbox.openDriveWindow()
-            else void window.foxbox.closeDriveWindow()
+            if (!next) void window.foxbox.closeDriveWindow()
             return next
           })
         }}
@@ -216,8 +215,8 @@ export default function App() {
           {driveAll ? (
             <div className="drive-layout">
               <p className="hint">
-                Drive all is on. Use the zoomed view or the extra window on another monitor. Click a tile to choose which
-                fox you watch.
+                Drive all is on. Clicks, scroll, and keys go to every fox. Open Drive window only if you want this on
+                another monitor.
               </p>
               <DrivePad fox={focused} fleetCount={instances.length} />
               <div className="drive-thumbs">
