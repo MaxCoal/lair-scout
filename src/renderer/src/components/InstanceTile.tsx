@@ -8,9 +8,10 @@ type Props = {
   driveAll: boolean
   onFocus: (id: string) => void
   onGotoOne: (id: string) => void
+  onRestart: (id: string) => void
 }
 
-export default function InstanceTile({ fox, driveAll, onFocus, onGotoOne }: Props) {
+export default function InstanceTile({ fox, driveAll, onFocus, onGotoOne, onRestart }: Props) {
   const lastMove = useRef(0)
   const id = targetId(driveAll, fox.id)
 
@@ -85,6 +86,17 @@ export default function InstanceTile({ fox, driveAll, onFocus, onGotoOne }: Prop
             }}
           >
             Send
+          </button>
+          <button
+            className="btn"
+            type="button"
+            title="New browser session (drops queue)"
+            onClick={(event) => {
+              event.stopPropagation()
+              onRestart(fox.id)
+            }}
+          >
+            Restart
           </button>
         </div>
       </div>

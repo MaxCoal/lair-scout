@@ -103,6 +103,11 @@ export default function App() {
     void window.foxbox.rushCheckout().finally(() => setRushing(false))
   }
 
+  const restartFox = (id: string): void => {
+    if (liveId === id) setLiveId(null)
+    void window.foxbox.restart(id)
+  }
+
   const selectFox = (id: string, live: boolean): void => {
     setFocusedId(id)
     setLiveId(live ? id : null)
@@ -150,6 +155,7 @@ export default function App() {
           instances={instances}
           focusedId={focusedId}
           onFocus={(id) => selectFox(id, !driveAll)}
+          onRestart={restartFox}
           onKill={(id) => {
             if (focusedId === id) setFocusedId(null)
             if (liveId === id) setLiveId(null)
@@ -173,6 +179,7 @@ export default function App() {
                   driveAll={driveAll}
                   onFocus={(id) => selectFox(id, false)}
                   onGotoOne={(id) => window.foxbox.gotoOne(id, url)}
+                  onRestart={restartFox}
                 />
               </div>
             </div>
@@ -182,6 +189,7 @@ export default function App() {
               driveAll={false}
               fleetCount={instances.length}
               live
+              onRestart={restartFox}
               onBack={() => {
                 setLiveId(null)
                 setFocusedId(null)
@@ -193,6 +201,7 @@ export default function App() {
               driveAll={false}
               onFocus={(id) => selectFox(id, true)}
               onGotoOne={(id) => window.foxbox.gotoOne(id, url)}
+              onRestart={restartFox}
             />
           )}
         </main>

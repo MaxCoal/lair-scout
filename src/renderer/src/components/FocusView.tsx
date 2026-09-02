@@ -9,9 +9,10 @@ type Props = {
   fleetCount: number
   live: boolean
   onBack: () => void
+  onRestart: (id: string) => void
 }
 
-export default function FocusView({ fox, driveAll, fleetCount, live, onBack }: Props) {
+export default function FocusView({ fox, driveAll, fleetCount, live, onBack, onRestart }: Props) {
   const stageRef = useRef<HTMLDivElement>(null)
   const lastMove = useRef(0)
 
@@ -98,6 +99,14 @@ export default function FocusView({ fox, driveAll, fleetCount, live, onBack }: P
           )}
           <button className="btn danger" type="button" onClick={() => window.foxbox.reload(fox.id)}>
             Reload (may drop queue)
+          </button>
+          <button
+            className="btn"
+            type="button"
+            title="New browser session (drops queue)"
+            onClick={() => onRestart(fox.id)}
+          >
+            Restart
           </button>
           <button className="btn" type="button" onClick={onBack}>
             Back to grid

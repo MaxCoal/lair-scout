@@ -6,9 +6,10 @@ type Props = {
   driveAll: boolean
   onFocus: (id: string) => void
   onGotoOne: (id: string) => void
+  onRestart: (id: string) => void
 }
 
-export default function InstanceGrid({ instances, driveAll, onFocus, onGotoOne }: Props) {
+export default function InstanceGrid({ instances, driveAll, onFocus, onGotoOne, onRestart }: Props) {
   return (
     <div className="grid">
       {instances.map((fox) => (
@@ -18,6 +19,7 @@ export default function InstanceGrid({ instances, driveAll, onFocus, onGotoOne }
           driveAll={driveAll}
           onFocus={onFocus}
           onGotoOne={onGotoOne}
+          onRestart={onRestart}
         />
       ))}
     </div>

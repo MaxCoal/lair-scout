@@ -253,6 +253,12 @@ input {
   text-align: left;
 }
 
+.fox-row-btns {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .fox-row.active,
 .fox-row:hover {
   border-color: rgba(249, 115, 22, 0.35);

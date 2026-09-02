@@ -5,10 +5,11 @@ type Props = {
   instances: InstanceSnapshot[]
   focusedId: string | null
   onFocus: (id: string) => void
+  onRestart: (id: string) => void
   onKill: (id: string) => void
 }
 
-export default function Sidebar({ instances, focusedId, onFocus, onKill }: Props) {
+export default function Sidebar({ instances, focusedId, onFocus, onRestart, onKill }: Props) {
   return (
     <aside className="sidebar">
       <div className="side-head">
@@ -24,9 +25,20 @@ export default function Sidebar({ instances, focusedId, onFocus, onKill }: Props
               <StatusChip status={fox.status} />
             </div>
           </button>
-          <button className="icon-btn" type="button" onClick={() => onKill(fox.id)} aria-label={`Kill Fox ${fox.id}`}>
-            ×
-          </button>
+          <div className="fox-row-btns">
+            <button
+              className="icon-btn"
+              type="button"
+              title={`Restart Fox ${fox.id}`}
+              aria-label={`Restart Fox ${fox.id}`}
+              onClick={() => onRestart(fox.id)}
+            >
+              ↻
+            </button>
+            <button className="icon-btn" type="button" onClick={() => onKill(fox.id)} aria-label={`Kill Fox ${fox.id}`}>
+              ×
+            </button>
+          </div>
         </div>
       ))}
     </aside>

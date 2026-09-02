@@ -83,7 +83,28 @@ export class FirefoxManager {
 
   async spawn(): Promise<string> {
     await this.ready
-    const id = String(this.nextId++)
+    return this.launch(String(this.nextId++))
+  }
+
+  async restart(id: string): Promise<void> {
+    await this.ready
+    const snap = this.snapshots.find((fox) => fox.id === id)
+    const url = snap?.url && /^https?:/i.test(snap.url) ? snap.url : undefined
+    const state = this.windows.get(id)
+    if (state?.interacting) {
+      state.interacting = false
+      this.fire('setPaused', { foxId: id, paused: false })
+    }
+    if (this.windows.has(id)) {
+      await this.call('kill', { foxId: id }).catch(() => undefined)
+      this.windows.delete(id)
+      this.broadcast()
+    }
+    await this.launch(id)
+    if (url) await this.gotoOne(id, url)
+  }
+
+  private async launch(id: string): Promise<string> {
     const profileDir = join(app.getPath('userData'), 'foxes', `${id}-${Date.now()}`)
     this.windows.set(id, { hwnd: 0, pid: 0, profileDir, poppedOut: false, interacting: false })
     const result = (await this.call('spawn', { foxId: id, profileDir }, 120000)) as { pid?: number }

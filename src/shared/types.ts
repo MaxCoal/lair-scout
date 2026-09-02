@@ -65,6 +65,7 @@ export type FoxboxAPI = {
   spawn: () => Promise<void>
   scaleTo: (count: number) => Promise<void>
   kill: (id: string) => Promise<void>
+  restart: (id: string) => Promise<void>
   gotoAll: (url: string) => Promise<void>
   rushCheckout: () => Promise<void>
   gotoOne: (id: string, url: string) => Promise<void>
