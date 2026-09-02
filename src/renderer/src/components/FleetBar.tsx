@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import type { RamSnapshot } from '@shared/types'
+import { foxSortLabel, type FoxSort } from '../sortFoxes'
 
 type Props = {
   url: string
@@ -16,6 +17,8 @@ type Props = {
   onToggleDriveAll: () => void
   onOpenDriveWindow: () => void
   onOpenSettings: () => void
+  foxSort: FoxSort
+  onCycleFoxSort: () => void
 }
 
 export default function FleetBar({
@@ -32,7 +35,9 @@ export default function FleetBar({
   onToggleMute,
   onToggleDriveAll,
   onOpenDriveWindow,
-  onOpenSettings
+  onOpenSettings,
+  foxSort,
+  onCycleFoxSort
 }: Props) {
   const [draft, setDraft] = useState(String(count))
   const editing = useRef(false)
@@ -123,6 +128,14 @@ export default function FleetBar({
         ) : null}
         <button className={`btn ghost ${driveAll ? 'active' : ''}`} type="button" onClick={onToggleDriveAll}>
           Drive all
+        </button>
+        <button
+          className={`btn ghost ${foxSort !== 'id' ? 'active' : ''}`}
+          type="button"
+          title="Sort foxes by remaining queue time"
+          onClick={onCycleFoxSort}
+        >
+          {foxSortLabel(foxSort)}
         </button>
         {driveAll ? (
           <button className="btn" type="button" onClick={onOpenDriveWindow}>

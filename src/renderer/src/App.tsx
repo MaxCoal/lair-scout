@@ -6,6 +6,7 @@ import InstanceGrid from './components/InstanceGrid'
 import FocusView from './components/FocusView'
 import DrivePad from './components/DrivePad'
 import SettingsModal from './components/SettingsModal'
+import { nextFoxSort, sortFoxes, type FoxSort } from './sortFoxes'
 
 const DEFAULT_URL = 'https://secretlair.wizards.com/us'
 const IS_DRIVE_PAD = window.location.hash === '#drive'
@@ -35,6 +36,7 @@ export default function App() {
   const [ram, setRam] = useState<RamSnapshot | null>(null)
   const [rushing, setRushing] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [foxSort, setFoxSort] = useState<FoxSort>('id')
 
   useEffect(() => {
     return window.foxbox.onRam(setRam)
@@ -94,6 +96,8 @@ export default function App() {
     [instances, focusedId]
   )
 
+  const sorted = useMemo(() => sortFoxes(instances, foxSort), [instances, foxSort])
+
   const sendAll = (event: FormEvent): void => {
     event.preventDefault()
     void window.foxbox.gotoAll(url)
@@ -152,11 +156,13 @@ export default function App() {
         }}
         onOpenDriveWindow={() => window.foxbox.openDriveWindow()}
         onOpenSettings={() => setSettingsOpen(true)}
+        foxSort={foxSort}
+        onCycleFoxSort={() => setFoxSort((value) => nextFoxSort(value))}
       />
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <div className="workspace">
         <Sidebar
-          instances={instances}
+          instances={sorted}
           focusedId={focusedId}
           onFocus={(id) => selectFox(id, !driveAll)}
           onRestart={restartFox}
@@ -179,7 +185,7 @@ export default function App() {
               <DrivePad fox={focused} fleetCount={instances.length} />
               <div className="drive-thumbs">
                 <InstanceGrid
-                  instances={instances}
+                  instances={sorted}
                   driveAll={driveAll}
                   onFocus={(id) => selectFox(id, false)}
                   onGotoOne={(id) => window.foxbox.gotoOne(id, url)}
@@ -201,7 +207,7 @@ export default function App() {
             />
           ) : (
             <InstanceGrid
-              instances={instances}
+              instances={sorted}
               driveAll={false}
               onFocus={(id) => selectFox(id, true)}
               onGotoOne={(id) => window.foxbox.gotoOne(id, url)}

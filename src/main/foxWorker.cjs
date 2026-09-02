@@ -9,8 +9,9 @@ const { execFileSync } = require('node:child_process')
 const readline = require('node:readline')
 
 const VIEWPORT = { width: 1280, height: 720 }
-const TICK_MS = 1000
-const FOCUS_TICK_MS = 280
+const GRID_TICK_MS = 50
+const LIVE_TICK_MS = 1400
+const SHOT_CONCURRENCY = 6
 const QUEUE_HOST = /queue-it\.net|queueit\.com|storequeue\.wizards\.com/i
 const PREQUEUE_COPY =
   /secret lair lounge|waiting room|the (sale|event|drop) has not (yet )?started|has not opened yet|please wait.*begin|we're getting ready|we are getting ready|pre-?queue|before the queue|queue has not started|not started yet|will begin shortly|doors (have not|haven'?t) opened/i
@@ -529,7 +530,7 @@ async function navigate(fox, url) {
   }
 }
 
-async function refreshFox(fox) {
+async function inspectFox(fox) {
   const page = pageOf(fox)
   if (!page) {
     fox.status = 'error'
@@ -540,27 +541,32 @@ async function refreshFox(fox) {
   if (fox.navigating) {
     fox.status = 'loading'
     if (!fox.statusLabel) fox.statusLabel = 'Loading'
-  } else {
-    const previous = fox.status
-    const read = await inspectPage(page, previous, fox.wasInQueue)
-    if (read.status === 'in_queue' || read.status === 'waiting_for_queue') fox.wasInQueue = true
-    fox.status = read.status
-    fox.statusLabel = read.statusLabel
-    fox.waitTime = read.waitTime
-    fox.queueNumber = read.queueNumber
-    fox.url = read.url
-    fox.host = read.host
-    fox.title = read.title
-    fox.error = read.status === 'error' ? fox.error || 'Could not read page' : undefined
-    if (isQueuePopEdge(previous, fox.status)) {
-      send({ type: 'event', event: 'queuePopped', payload: fox.id })
-    }
-    if (isAdmissionEdge(previous, fox.status)) {
-      fox.admittedFlashUntil = Date.now() + 12000
-      send({ type: 'event', event: 'admitted', payload: fox.id })
-    }
+    return
   }
+  const previous = fox.status
+  const read = await inspectPage(page, previous, fox.wasInQueue)
+  if (read.status === 'in_queue' || read.status === 'waiting_for_queue') fox.wasInQueue = true
+  fox.status = read.status
+  fox.statusLabel = read.statusLabel
+  fox.waitTime = read.waitTime
+  fox.queueNumber = read.queueNumber
+  fox.url = read.url
+  fox.host = read.host
+  fox.title = read.title
+  fox.error = read.status === 'error' ? fox.error || 'Could not read page' : undefined
+  if (isQueuePopEdge(previous, fox.status)) {
+    send({ type: 'event', event: 'queuePopped', payload: fox.id })
+  }
+  if (isAdmissionEdge(previous, fox.status)) {
+    fox.admittedFlashUntil = Date.now() + 12000
+    send({ type: 'event', event: 'admitted', payload: fox.id })
+  }
+}
+
+async function shotFox(fox) {
   if (pausedIds.has(fox.id)) return
+  const page = pageOf(fox)
+  if (!page) return
   try {
     const quality = focusedId === fox.id ? 58 : 38
     const buffer = await page.screenshot({ type: 'jpeg', quality })
@@ -570,6 +576,19 @@ async function refreshFox(fox) {
   }
 }
 
+async function mapPool(items, limit, fn) {
+  let index = 0
+  const n = Math.max(1, Math.min(limit, items.length || 1))
+  await Promise.all(
+    Array.from({ length: n }, async () => {
+      while (index < items.length) {
+        const item = items[index++]
+        await fn(item)
+      }
+    })
+  )
+}
+
 async function tick() {
   if (ticking || shuttingDown || spawning) {
     scheduleTick()
@@ -577,8 +596,14 @@ async function tick() {
   }
   ticking = true
   try {
-    for (const fox of instances.values()) await refreshFox(fox)
+    const foxes = [...instances.values()]
+    await Promise.allSettled(foxes.map((fox) => inspectFox(fox)))
     emitUpdate()
+    const live = pausedIds.size > 0
+    if (!live && foxes.length) {
+      await mapPool(foxes, SHOT_CONCURRENCY, shotFox)
+      emitUpdate()
+    }
   } finally {
     ticking = false
     scheduleTick()
@@ -586,7 +611,7 @@ async function tick() {
 }
 
 function scheduleTick() {
-  const delay = focusedId ? FOCUS_TICK_MS : TICK_MS
+  const delay = pausedIds.size > 0 ? LIVE_TICK_MS : GRID_TICK_MS
   setTimeout(() => {
     void tick()
   }, delay)
