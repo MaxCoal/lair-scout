@@ -8,6 +8,7 @@ import DrivePad from './components/DrivePad'
 import SettingsModal from './components/SettingsModal'
 import QueueNoticeBox from './components/QueueNoticeBox'
 import { nextInstanceSort, sortInstances, type InstanceSort } from './sortInstances'
+import { applyTheme } from './theme'
 
 const DEFAULT_URL = 'https://secretlair.wizards.com/us'
 const IS_DRIVE_PAD = window.location.hash === '#drive'
@@ -39,6 +40,11 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [instanceSort, setInstanceSort] = useState<InstanceSort>('id')
   const [dismissedNotices, setDismissedNotices] = useState<string[]>([])
+
+  useEffect(() => {
+    void window.lairscout.getSettings().then((settings) => applyTheme(settings.theme))
+    return window.lairscout.onSettings((settings) => applyTheme(settings.theme))
+  }, [])
 
   useEffect(() => {
     return window.lairscout.onRam(setRam)

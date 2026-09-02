@@ -79,6 +79,12 @@ export type ShippingProfile = {
   address: string
 }
 
+export type ThemeId = 'dungeon' | 'daylight'
+
+export type AppSettings = ShippingProfile & {
+  theme: ThemeId
+}
+
 export type LairScoutAPI = {
   spawn: () => Promise<void>
   scaleTo: (count: number) => Promise<void>
@@ -100,11 +106,12 @@ export type LairScoutAPI = {
   closeDriveWindow: () => Promise<void>
   setMuted: (muted: boolean) => Promise<void>
   setFocused: (id: string | null) => Promise<void>
-  getSettings: () => Promise<ShippingProfile>
-  saveSettings: (profile: ShippingProfile) => Promise<ShippingProfile>
+  getSettings: () => Promise<AppSettings>
+  saveSettings: (settings: AppSettings) => Promise<AppSettings>
   onUpdate: (cb: (instances: InstanceSnapshot[]) => void) => () => void
   onAdmitted: (cb: (id: string) => void) => () => void
   onQueuePopped: (cb: (id: string) => void) => () => void
   onQueueMessage: (cb: (payload: { foxId: string; notice: QueueNotice }) => void) => () => void
   onRam: (cb: (ram: RamSnapshot) => void) => () => void
+  onSettings: (cb: (settings: AppSettings) => void) => () => void
 }

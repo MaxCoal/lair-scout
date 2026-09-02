@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
+  AppSettings,
   ClickPayload,
   LairScoutAPI,
   InstanceSnapshot,
@@ -7,8 +8,7 @@ import type {
   MovePayload,
   QueueNotice,
   RamSnapshot,
-  ScrollPayload,
-  ShippingProfile
+  ScrollPayload
 } from '@shared/types'
 
 const api: LairScoutAPI = {
@@ -41,7 +41,7 @@ const api: LairScoutAPI = {
   setMuted: (muted) => ipcRenderer.invoke('alerts:setMuted', muted),
   setFocused: (id) => ipcRenderer.invoke('instances:setFocused', id),
   getSettings: () => ipcRenderer.invoke('settings:get'),
-  saveSettings: (profile: ShippingProfile) => ipcRenderer.invoke('settings:save', profile),
+  saveSettings: (settings: AppSettings) => ipcRenderer.invoke('settings:save', settings),
   onUpdate: (cb) => {
     const listener = (_event: unknown, instances: InstanceSnapshot[]): void => cb(instances)
     ipcRenderer.on('instances:update', listener)
@@ -78,6 +78,13 @@ const api: LairScoutAPI = {
     ipcRenderer.on('stats:ram', listener)
     return () => {
       ipcRenderer.removeListener('stats:ram', listener)
+    }
+  },
+  onSettings: (cb) => {
+    const listener = (_event: unknown, settings: AppSettings): void => cb(settings)
+    ipcRenderer.on('settings:update', listener)
+    return () => {
+      ipcRenderer.removeListener('settings:update', listener)
     }
   }
 }

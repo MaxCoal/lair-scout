@@ -13,6 +13,7 @@ function copyRuntimeFiles(): Plugin {
   const copy = (): void => {
     mkdirSync('out/main', { recursive: true })
     for (const name of files) cpSync(`src/main/${name}`, `out/main/${name}`)
+    cpSync('resources/icon.ico', 'out/main/icon.ico')
   }
   return {
     name: 'copy-runtime-files',
@@ -21,9 +22,12 @@ function copyRuntimeFiles(): Plugin {
     configureServer(server) {
       copy()
       for (const name of files) server.watcher.add(resolve(`src/main/${name}`))
+      server.watcher.add(resolve('resources/icon.ico'))
       server.watcher.on('change', (file) => {
         const norm = file.replace(/\\/g, '/')
-        if (files.some((name) => norm.endsWith(`src/main/${name}`))) copy()
+        if (files.some((name) => norm.endsWith(`src/main/${name}`)) || norm.endsWith('resources/icon.ico')) {
+          copy()
+        }
       })
     }
   }

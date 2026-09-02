@@ -1,12 +1,18 @@
 import { app, shell, BrowserWindow, ipcMain } from 'electron'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { scoutManager } from './scoutManager'
-import type { ShippingProfile } from '@shared/types'
+import type { AppSettings } from '@shared/types'
 
 let quitting = false
 let mainWindow: BrowserWindow | null = null
 let driveWindow: BrowserWindow | null = null
+
+function appIcon(): string | undefined {
+  const candidates = [join(__dirname, 'icon.ico'), join(process.cwd(), 'resources', 'icon.ico')]
+  return candidates.find((path) => existsSync(path))
+}
 
 function rendererPrefs() {
   return {
@@ -34,8 +40,9 @@ function createWindow(): BrowserWindow {
     minWidth: 1024,
     minHeight: 700,
     show: false,
-    backgroundColor: '#0d0b09',
+    backgroundColor: '#100c0a',
     title: 'Lair Scout',
+    icon: appIcon(),
     autoHideMenuBar: true,
     webPreferences: rendererPrefs()
   })
@@ -69,8 +76,9 @@ function createDriveWindow(): void {
     height: 740,
     minWidth: 640,
     minHeight: 420,
-    backgroundColor: '#0d0b09',
+    backgroundColor: '#100c0a',
     title: 'Lair Scout Drive',
+    icon: appIcon(),
     autoHideMenuBar: true,
     webPreferences: rendererPrefs()
   })
@@ -127,7 +135,7 @@ function registerIpc(): void {
   ipcMain.handle('alerts:setMuted', (_event, muted: boolean) => scoutManager.setMuted(muted))
   ipcMain.handle('instances:setFocused', (_event, id: string | null) => scoutManager.setFocused(id))
   ipcMain.handle('settings:get', () => scoutManager.getSettings())
-  ipcMain.handle('settings:save', (_event, profile: ShippingProfile) => scoutManager.saveProfile(profile))
+  ipcMain.handle('settings:save', (_event, settings: AppSettings) => scoutManager.saveProfile(settings))
 }
 
 app.whenReady().then(async () => {

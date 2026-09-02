@@ -682,7 +682,7 @@ async function spawnFox(foxId, profileDir) {
     await applyShippingToFox(fox)
     emitUpdate()
     await page.goto(
-      `data:text/html,<html><head><title>LairScout-${foxId}</title></head><body style="margin:0;background:#0c0d10;color:#e8eaed;font-family:Segoe UI,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh"><div style="text-align:center"><div style="letter-spacing:.2em;text-transform:uppercase;color:#c9a36a">Lair Scout</div><h1>Scout ${foxId}</h1><p style="color:#8b919a">Ready. Use Send all to navigate.</p></div></body></html>`,
+      `data:text/html,<html><head><title>LairScout-${foxId}</title></head><body style="margin:0;background:#100c0a;color:#f4ead8;font-family:Segoe UI,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh"><div style="text-align:center"><div style="letter-spacing:.2em;text-transform:uppercase;color:#e8943a">Lair Scout</div><h1>Scout ${foxId}</h1><p style="color:#a89278">Ready. Use Send all to navigate.</p></div></body></html>`,
       { waitUntil: 'domcontentloaded' }
     )
     fox.url = page.url()

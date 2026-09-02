@@ -2,33 +2,41 @@ import { existsSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { app } from 'electron'
-import type { ShippingProfile } from '@shared/types'
+import type { AppSettings, ThemeId } from '@shared/types'
 
-const empty = (): ShippingProfile => ({ name: '', address: '' })
+export function emptySettings(): AppSettings {
+  return { name: '', address: '', theme: 'dungeon' }
+}
+
+function parseTheme(value: unknown): ThemeId {
+  return value === 'daylight' ? 'daylight' : 'dungeon'
+}
 
 export function settingsPath(): string {
   const root = app.isPackaged ? app.getPath('userData') : process.cwd()
   return join(root, 'settings.json')
 }
 
-export async function loadSettings(): Promise<ShippingProfile> {
+export async function loadSettings(): Promise<AppSettings> {
   const path = settingsPath()
-  if (!existsSync(path)) return empty()
+  if (!existsSync(path)) return emptySettings()
   try {
-    const raw = JSON.parse(await readFile(path, 'utf8')) as Partial<ShippingProfile>
+    const raw = JSON.parse(await readFile(path, 'utf8')) as Partial<AppSettings>
     return {
       name: String(raw.name || ''),
-      address: String(raw.address || '')
+      address: String(raw.address || ''),
+      theme: parseTheme(raw.theme)
     }
   } catch {
-    return empty()
+    return emptySettings()
   }
 }
 
-export async function saveSettings(profile: ShippingProfile): Promise<ShippingProfile> {
-  const next: ShippingProfile = {
-    name: String(profile.name || '').trim(),
-    address: String(profile.address || '').trim()
+export async function saveSettings(settings: AppSettings): Promise<AppSettings> {
+  const next: AppSettings = {
+    name: String(settings.name || '').trim(),
+    address: String(settings.address || '').trim(),
+    theme: parseTheme(settings.theme)
   }
   await writeFile(settingsPath(), `${JSON.stringify(next, null, 2)}\n`, 'utf8')
   return next

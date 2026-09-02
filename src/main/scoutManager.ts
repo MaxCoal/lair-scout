@@ -3,10 +3,10 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { join } from 'node:path'
-import type { InstanceSnapshot, RamSnapshot, ShippingProfile } from '@shared/types'
+import type { AppSettings, InstanceSnapshot, RamSnapshot, ShippingProfile } from '@shared/types'
 import { findScoutWindow, hideScoutWindow, moveScoutWindow, placeScoutWindow, setClipChildren, showWindow, stopWin32Host } from './win32'
 import { readRam } from './memory'
-import { loadSettings, saveSettings } from './settings'
+import { emptySettings, loadSettings, saveSettings } from './settings'
 
 const DEFAULT_COUNT = 2
 const MAX_FLEET = 20
@@ -46,6 +46,7 @@ export class ScoutManager {
   private muted = false
   private shuttingDown = false
   private shipping: ShippingProfile = { name: '', address: '' }
+  private settings: AppSettings = emptySettings()
   private dockTimer: NodeJS.Timeout | null = null
   private interactTimer: NodeJS.Timeout | null = null
   private ramTimer: NodeJS.Timeout | null = null
@@ -68,8 +69,10 @@ export class ScoutManager {
     this.armDockTimer()
     this.armInteractTimer()
     this.armRamTimer()
-    void loadSettings().then((profile) => {
-      this.shipping = profile
+    void loadSettings().then((settings) => {
+      this.settings = settings
+      this.shipping = { name: settings.name, address: settings.address }
+      this.broadcastSettings()
       void this.pushProfile()
     })
     window.on('move', () => {
@@ -80,14 +83,22 @@ export class ScoutManager {
     })
   }
 
-  getSettings(): ShippingProfile {
-    return this.shipping
+  getSettings(): AppSettings {
+    return this.settings
   }
 
-  async saveProfile(profile: ShippingProfile): Promise<ShippingProfile> {
-    this.shipping = await saveSettings(profile)
+  async saveProfile(settings: AppSettings): Promise<AppSettings> {
+    this.settings = await saveSettings(settings)
+    this.shipping = { name: this.settings.name, address: this.settings.address }
+    this.broadcastSettings()
     await this.pushProfile()
-    return this.shipping
+    return this.settings
+  }
+
+  private broadcastSettings(): void {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send('settings:update', this.settings)
+    }
   }
 
   private async pushProfile(): Promise<void> {

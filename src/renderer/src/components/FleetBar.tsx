@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import type { RamSnapshot } from '@shared/types'
 import { instanceSortLabel, type InstanceSort } from '../sortInstances'
+import mark from '../assets/lair-scout-mark.png'
 
 function tone(percent: number): string {
   if (percent >= 90) return 'critical'
@@ -66,13 +67,7 @@ export default function FleetBar({
     <header className="topbar">
       <div className="top-row">
         <div className="brand">
-          <svg className="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
-            <path
-              fill="#c9a36a"
-              d="M16 3.5l3.2 8.2 8.8.6-6.8 5.4 2.2 8.5L16 21.6 8.6 26.2l2.2-8.5-6.8-5.4 8.8-.6z"
-            />
-            <circle cx="16" cy="16" r="3.2" fill="#0b0c0f" />
-          </svg>
+          <img className="brand-mark" src={mark} width={48} height={48} alt="" />
           <div className="brand-name">
             Lair<span>Scout</span>
           </div>
