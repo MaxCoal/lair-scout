@@ -86,6 +86,7 @@ function closeDriveWindow(): void {
 
 function registerIpc(): void {
   ipcMain.handle('instances:spawn', () => firefoxManager.spawn())
+  ipcMain.handle('instances:scaleTo', (_event, count: number) => firefoxManager.scaleTo(count))
   ipcMain.handle('instances:kill', (_event, id: string) => firefoxManager.kill(id))
   ipcMain.handle('instances:gotoAll', (_event, url: string) => firefoxManager.gotoAll(url))
   ipcMain.handle('instances:gotoOne', (_event, id: string, url: string) => firefoxManager.gotoOne(id, url))

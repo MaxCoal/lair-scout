@@ -3,10 +3,12 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { join } from 'node:path'
-import type { InstanceSnapshot } from '@shared/types'
+import type { InstanceSnapshot, RamSnapshot } from '@shared/types'
 import { findFoxWindow, hideFoxWindow, placeFoxWindow, showWindow, stopWin32Host } from './win32'
+import { readRam } from './memory'
 
 const DEFAULT_COUNT = 2
+const MAX_FLEET = 20
 
 type WindowState = {
   hwnd: number
@@ -30,6 +32,7 @@ export class FirefoxManager {
   private shuttingDown = false
   private dockTimer: NodeJS.Timeout | null = null
   private interactTimer: NodeJS.Timeout | null = null
+  private ramTimer: NodeJS.Timeout | null = null
   private stageRect: StageRect | null = null
   private ready: Promise<void>
   private markReady: () => void = () => undefined
@@ -45,6 +48,7 @@ export class FirefoxManager {
     this.ensureWorker()
     this.armDockTimer()
     this.armInteractTimer()
+    this.armRamTimer()
     window.on('move', () => {
       void this.relayoutInteract()
     })
@@ -95,6 +99,18 @@ export class FirefoxManager {
     }
     this.broadcast()
     return id
+  }
+
+  async scaleTo(target: number): Promise<void> {
+    const n = Math.max(0, Math.min(MAX_FLEET, Math.floor(Number(target) || 0)))
+    while (this.windows.size < n) {
+      await this.spawn()
+    }
+    while (this.windows.size > n) {
+      const last = [...this.windows.keys()].at(-1)
+      if (!last) break
+      await this.kill(last)
+    }
   }
 
   async kill(id: string): Promise<void> {
@@ -205,6 +221,7 @@ export class FirefoxManager {
     this.shuttingDown = true
     if (this.dockTimer) clearInterval(this.dockTimer)
     if (this.interactTimer) clearInterval(this.interactTimer)
+    if (this.ramTimer) clearInterval(this.ramTimer)
     try {
       await this.call('shutdown', {})
     } catch {
@@ -243,6 +260,27 @@ export class FirefoxManager {
       if (!state.interacting) continue
       const hwnd = await this.placeState(id, state, this.stageRect)
       if (hwnd) state.hwnd = hwnd
+    }
+  }
+
+  private armRamTimer(): void {
+    if (this.ramTimer) return
+    const tick = (): void => {
+      if (this.shuttingDown) return
+      const pids = [process.pid, this.worker?.pid ?? 0]
+      for (const state of this.windows.values()) pids.push(state.pid)
+      void readRam(pids).then((ram) => {
+        if (this.shuttingDown) return
+        this.emitRam(ram)
+      })
+    }
+    tick()
+    this.ramTimer = setInterval(tick, 2000)
+  }
+
+  private emitRam(ram: RamSnapshot): void {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send('stats:ram', ram)
     }
   }
 

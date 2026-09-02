@@ -104,11 +104,67 @@ input {
   box-shadow: 0 0 0 3px var(--fox-dim);
 }
 
-.top-actions,
+.top-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .stepper {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.count-input {
+  width: 52px;
+  height: 40px;
+  border: 1px solid var(--line-strong);
+  background: var(--bg-elev);
+  color: var(--text);
+  border-radius: 10px;
+  text-align: center;
+  padding: 0 6px;
+  outline: none;
+}
+
+.count-input:focus {
+  border-color: rgba(249, 115, 22, 0.7);
+  box-shadow: 0 0 0 3px var(--fox-dim);
+}
+
+.ram-meter {
+  position: relative;
+  min-width: 210px;
+  height: 40px;
+  border: 1px solid var(--line-strong);
+  background: var(--bg-elev);
+  border-radius: 10px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+}
+
+.ram-bar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: rgba(52, 211, 153, 0.18);
+}
+
+.ram-meter.warn .ram-bar {
+  background: rgba(251, 191, 36, 0.22);
+}
+
+.ram-meter.critical .ram-bar {
+  background: rgba(248, 113, 113, 0.28);
+}
+
+.ram-meter span {
+  position: relative;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .btn {

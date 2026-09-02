@@ -5,11 +5,13 @@ import type {
   InstanceSnapshot,
   KeyPayload,
   MovePayload,
+  RamSnapshot,
   ScrollPayload
 } from '@shared/types'
 
 const api: FoxboxAPI = {
   spawn: () => ipcRenderer.invoke('instances:spawn'),
+  scaleTo: (count) => ipcRenderer.invoke('instances:scaleTo', count),
   kill: (id) => ipcRenderer.invoke('instances:kill', id),
   gotoAll: (url) => ipcRenderer.invoke('instances:gotoAll', url),
   gotoOne: (id, url) => ipcRenderer.invoke('instances:gotoOne', id, url),
@@ -53,6 +55,13 @@ const api: FoxboxAPI = {
     ipcRenderer.on('instances:queuePopped', listener)
     return () => {
       ipcRenderer.removeListener('instances:queuePopped', listener)
+    }
+  },
+  onRam: (cb) => {
+    const listener = (_event: unknown, ram: RamSnapshot): void => cb(ram)
+    ipcRenderer.on('stats:ram', listener)
+    return () => {
+      ipcRenderer.removeListener('stats:ram', listener)
     }
   }
 }

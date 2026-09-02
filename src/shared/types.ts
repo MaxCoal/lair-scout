@@ -16,10 +16,10 @@ export type InstanceSnapshot = {
   statusLabel: string
   waitTime?: string
   queueNumber?: string
-    screenshot?: string
-    interacting: boolean
-    poppedOut: boolean
-    focused?: boolean
+  screenshot?: string
+  interacting: boolean
+  poppedOut: boolean
+  focused?: boolean
   error?: string
   admittedFlash: boolean
 }
@@ -50,8 +50,20 @@ export type MovePayload = {
   ny: number
 }
 
+export type RamSnapshot = {
+  usedBytes: number
+  totalBytes: number
+  freeBytes: number
+  foxboxBytes: number
+  percent: number
+  usedLabel: string
+  totalLabel: string
+  foxboxLabel: string
+}
+
 export type FoxboxAPI = {
   spawn: () => Promise<void>
+  scaleTo: (count: number) => Promise<void>
   kill: (id: string) => Promise<void>
   gotoAll: (url: string) => Promise<void>
   gotoOne: (id: string, url: string) => Promise<void>
@@ -71,4 +83,5 @@ export type FoxboxAPI = {
   onUpdate: (cb: (instances: InstanceSnapshot[]) => void) => () => void
   onAdmitted: (cb: (id: string) => void) => () => void
   onQueuePopped: (cb: (id: string) => void) => () => void
+  onRam: (cb: (ram: RamSnapshot) => void) => () => void
 }

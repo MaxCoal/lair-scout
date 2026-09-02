@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import type { InstanceSnapshot } from '@shared/types'
+import type { InstanceSnapshot, RamSnapshot } from '@shared/types'
 import FleetBar from './components/FleetBar'
 import Sidebar from './components/Sidebar'
 import InstanceGrid from './components/InstanceGrid'
@@ -31,6 +31,11 @@ export default function App() {
   const [liveId, setLiveId] = useState<string | null>(null)
   const [muted, setMuted] = useState(false)
   const [driveAll, setDriveAll] = useState(false)
+  const [ram, setRam] = useState<RamSnapshot | null>(null)
+
+  useEffect(() => {
+    return window.foxbox.onRam(setRam)
+  }, [])
 
   useEffect(() => {
     return window.foxbox.onUpdate(setInstances)
@@ -109,15 +114,12 @@ export default function App() {
       <FleetBar
         url={url}
         count={instances.length}
+        ram={ram}
         muted={muted}
         driveAll={driveAll}
         onUrl={setUrl}
         onSendAll={sendAll}
-        onSpawn={() => window.foxbox.spawn()}
-        onKillLast={() => {
-          const last = instances.at(-1)
-          if (last) void window.foxbox.kill(last.id)
-        }}
+        onScaleTo={(next) => window.foxbox.scaleTo(next)}
         onToggleMute={() => {
           const next = !muted
           setMuted(next)
