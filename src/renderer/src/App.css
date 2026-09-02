@@ -371,6 +371,15 @@ input {
   line-height: 1.5;
 }
 
+.queue-notice.stock {
+  border-color: rgba(248, 113, 113, 0.55);
+  box-shadow: 0 0 24px rgba(248, 113, 113, 0.12);
+}
+
+.queue-notice.stock .queue-notice-head {
+  color: #fecaca;
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));

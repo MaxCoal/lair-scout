@@ -18,7 +18,7 @@ const PREQUEUE_COPY =
 const IN_QUEUE_COPY =
   /you are (now )?in line|you're in line|you are in the queue|people ahead of you|visitors ahead of you|your estimated wait|estimated wait time|place in line|queue number/i
 const YOUR_TURN = /it['’]?s your turn|you can now enter|you(?:'| a)?re next|you have been redirected/i
-const LONG_WAIT = /more th[ae]n an hour|over an hour|over 1 hour|>\s*an hour|greater than (an|1) hour/i
+const STOCK_COPY = /sold out|out of stock/i
 
 /** @type {Map<string, any>} */
 const instances = new Map()
@@ -101,7 +101,8 @@ function mergeExtract(parts) {
     messageId: '',
     messageHeader: '',
     messageTime: '',
-    messageText: ''
+    messageText: '',
+    stockText: ''
   }
   for (const part of parts) {
     if (!part) continue
@@ -119,6 +120,7 @@ function mergeExtract(parts) {
       merged.messageTime = part.messageTime || ''
       merged.messageText = part.messageText
     }
+    if (!merged.stockText && part.stockText) merged.stockText = part.stockText
   }
   return merged
 }
@@ -189,12 +191,26 @@ async function extractFrame(frame) {
         messageTime = messageTime || [stamp, zone].filter(Boolean).join(' ')
       }
     }
+    let stockText = ''
+    const stockModal = document.querySelector(
+      '#modal_errorPopup.in, #modal_errorPopup.show, #popup_waitingList.in, #popup_waitingList.show'
+    )
+    if (stockModal && stockModal.offsetHeight) stockText = String(stockModal.innerText || '').trim()
+    if (!stockText) {
+      const visible = [...document.querySelectorAll('p, li, .modal-body, .toast-msg, [role="alert"]')].find((el) => {
+        if (!el.offsetHeight) return false
+        const copy = String(el.innerText || '')
+        return /sold out|out of stock/i.test(copy) && copy.length < 800
+      })
+      if (visible) stockText = String(visible.innerText || '').trim()
+    }
     return {
       ...fromVm,
       messageId,
       messageHeader,
       messageTime,
       messageText,
+      stockText,
       hasQueueUi: Boolean(
         vm ||
           document.querySelector('#queueit_overlay') ||
@@ -218,14 +234,20 @@ function cleanNoticeText(text) {
 }
 
 function toQueueNotice(extracted) {
-  const text = cleanNoticeText(extracted.messageText)
+  const lounge = cleanNoticeText(extracted.messageText)
+  const stock = cleanNoticeText(extracted.stockText)
+  const text = lounge || stock
   if (!text) return undefined
-  const header = String(extracted.messageHeader || 'Message').trim()
+  const kind = STOCK_COPY.test(text) ? 'stock' : 'message'
+  const header =
+    kind === 'stock'
+      ? String(extracted.messageHeader || 'Out of stock').trim() || 'Out of stock'
+      : String(extracted.messageHeader || 'Message').trim()
   const time = String(extracted.messageTime || '')
     .replace(/\u202f/g, ' ')
     .trim()
   const id = String(extracted.messageId || `${header}|${time}|${text}`).trim()
-  return { id, header, time, text }
+  return { id, header, time, text, kind }
 }
 
 async function inspectPage(page, previous, wasInQueue) {
@@ -638,7 +660,7 @@ async function inspectFox(fox) {
   fox.error = read.status === 'error' ? fox.error || 'Could not read page' : undefined
   const notice = read.queueNotice
   fox.queueNotice = notice
-  const noticeKey = notice?.id || ''
+  const noticeKey = notice ? `${notice.id}|${notice.kind}|${notice.text}` : ''
   if (notice && noticeKey !== fox.lastNoticeId) {
     fox.lastNoticeId = noticeKey
     send({ type: 'event', event: 'queueMessage', payload: { foxId: fox.id, notice } })

@@ -61,11 +61,15 @@ export default function App() {
   }, [muted])
 
   useEffect(() => {
-    return window.foxbox.onQueueMessage(() => {
-      if (!muted) {
-        playTone(523, 784)
-        window.setTimeout(() => playTone(784, 1046), 180)
+    return window.foxbox.onQueueMessage(({ notice }) => {
+      if (muted) return
+      if (notice.kind === 'stock') {
+        playTone(196, 392)
+        window.setTimeout(() => playTone(392, 262), 200)
+        return
       }
+      playTone(523, 784)
+      window.setTimeout(() => playTone(784, 1046), 180)
     })
   }, [muted])
 
@@ -115,7 +119,7 @@ export default function App() {
     for (const fox of instances) {
       const notice = fox.queueNotice
       if (!notice?.text) continue
-      const key = notice.id || notice.text
+      const key = `${notice.id}|${notice.text}`
       if (hidden.has(key) || byId.has(key)) continue
       byId.set(key, notice)
     }
@@ -199,10 +203,10 @@ export default function App() {
         <main className="main">
           {queueNotices.map((notice) => (
             <QueueNoticeBox
-              key={notice.id || notice.text}
+              key={`${notice.id}|${notice.text}`}
               notice={notice}
               onDismiss={() =>
-                setDismissedNotices((ids) => [...ids, notice.id || notice.text])
+                setDismissedNotices((ids) => [...ids, `${notice.id}|${notice.text}`])
               }
             />
           ))}

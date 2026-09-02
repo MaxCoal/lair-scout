@@ -12,6 +12,7 @@ export type QueueNotice = {
   header: string
   time: string
   text: string
+  kind: 'message' | 'stock'
 }
 
 export type InstanceSnapshot = {

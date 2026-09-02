@@ -550,21 +550,26 @@ export class FirefoxManager {
     }
 
     if (message.type === 'event' && message.event === 'queueMessage') {
-      const payload = message.payload as { foxId?: string; notice?: { id?: string; header?: string; time?: string; text?: string } }
+      const payload = message.payload as {
+        foxId?: string
+        notice?: { id?: string; header?: string; time?: string; text?: string; kind?: 'message' | 'stock' }
+      }
       const notice = payload?.notice
       const text = String(notice?.text || '').trim()
       if (!text) return
-      const key = String(notice?.id || text)
+      const kind = notice?.kind === 'stock' || /sold out|out of stock/i.test(text) ? 'stock' : 'message'
+      const key = `${notice?.id || ''}|${kind}|${text}`
       if (this.seenNotices.has(key)) return
       this.seenNotices.add(key)
-      const title = notice?.time ? `Queue message · ${notice.time}` : 'Queue message'
+      const title = kind === 'stock' ? 'Out of stock' : notice?.time ? `Queue message · ${notice.time}` : 'Queue message'
       this.emitNotice('instances:queueMessage', String(payload.foxId || foxId), title, text, {
         foxId: String(payload.foxId || foxId),
         notice: {
-          id: key,
-          header: String(notice?.header || 'Message'),
+          id: String(notice?.id || key),
+          header: String(notice?.header || (kind === 'stock' ? 'Out of stock' : 'Message')),
           time: String(notice?.time || ''),
-          text
+          text,
+          kind
         }
       })
       return
