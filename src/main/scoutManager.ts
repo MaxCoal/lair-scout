@@ -113,6 +113,12 @@ export class ScoutManager {
     this.muted = muted
   }
 
+  activeCount(): number {
+    return this.snapshots.filter(
+      (s) => s.status === 'in_queue' || s.status === 'waiting_for_queue' || s.status === 'admitted'
+    ).length
+  }
+
   async setFocused(id: string | null): Promise<void> {
     this.forEachWorker((handle) => this.write(handle, { requestId: 0, cmd: 'setFocused', foxId: id }))
   }

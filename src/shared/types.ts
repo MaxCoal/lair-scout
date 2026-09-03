@@ -117,4 +117,5 @@ export type LairScoutAPI = {
   onQueueMessage: (cb: (payload: { foxId: string; notice: QueueNotice }) => void) => () => void
   onRam: (cb: (ram: RamSnapshot) => void) => () => void
   onSettings: (cb: (settings: AppSettings) => void) => () => void
+  quit: () => Promise<void>
 }

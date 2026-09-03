@@ -86,7 +86,8 @@ const api: LairScoutAPI = {
     return () => {
       ipcRenderer.removeListener('settings:update', listener)
     }
-  }
+  },
+  quit: () => ipcRenderer.invoke('app:quit')
 }
 
 contextBridge.exposeInMainWorld('lairscout', api)

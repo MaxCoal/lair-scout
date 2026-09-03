@@ -352,6 +352,19 @@ input {
   color: #6ee7b7;
 }
 
+.btn.ghost.quit-btn {
+  font-size: 18px;
+  line-height: 1;
+  padding: 0 10px;
+  color: var(--muted);
+}
+
+.btn.ghost.quit-btn:hover {
+  color: var(--error);
+  border-color: var(--error);
+  background: rgba(224, 122, 106, 0.12);
+}
+
 .btn.danger:hover {
   border-color: rgba(248, 113, 113, 0.5);
   color: #fecaca;

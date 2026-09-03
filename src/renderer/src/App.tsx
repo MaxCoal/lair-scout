@@ -191,6 +191,7 @@ export default function App() {
         onOpenSettings={() => setSettingsOpen(true)}
         instanceSort={instanceSort}
         onCycleInstanceSort={() => setInstanceSort((value) => nextInstanceSort(value))}
+        onQuit={() => void window.lairscout.quit()}
       />
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <div className="workspace">

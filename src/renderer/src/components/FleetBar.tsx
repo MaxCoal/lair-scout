@@ -26,6 +26,7 @@ type Props = {
   onOpenSettings: () => void
   instanceSort: InstanceSort
   onCycleInstanceSort: () => void
+  onQuit: () => void
 }
 
 export default function FleetBar({
@@ -44,7 +45,8 @@ export default function FleetBar({
   onOpenDriveWindow,
   onOpenSettings,
   instanceSort,
-  onCycleInstanceSort
+  onCycleInstanceSort,
+  onQuit
 }: Props) {
   const [draft, setDraft] = useState(String(count))
   const editing = useRef(false)
@@ -166,6 +168,9 @@ export default function FleetBar({
           </button>
           <button className={`btn ghost ${muted ? '' : 'alerts-on'}`} type="button" onClick={onToggleMute}>
             {muted ? 'Alerts off' : 'Alerts on'}
+          </button>
+          <button className="btn ghost quit-btn" type="button" title="Quit Lair Scout" onClick={onQuit}>
+            ×
           </button>
         </div>
       </div>

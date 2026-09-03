@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -136,6 +136,22 @@ function registerIpc(): void {
   ipcMain.handle('instances:setFocused', (_event, id: string | null) => scoutManager.setFocused(id))
   ipcMain.handle('settings:get', () => scoutManager.getSettings())
   ipcMain.handle('settings:save', (_event, settings: AppSettings) => scoutManager.saveProfile(settings))
+  ipcMain.handle('app:quit', async () => {
+    const activeCount = scoutManager.activeCount()
+    if (activeCount > 0) {
+      const result = await dialog.showMessageBox({
+        type: 'question',
+        buttons: ['Quit', 'Cancel'],
+        defaultId: 1,
+        cancelId: 1,
+        title: 'Quit Lair Scout',
+        message: `${activeCount} scout${activeCount === 1 ? ' is' : 's are'} in the queue.`,
+        detail: 'Quitting will close all browser sessions. Continue?'
+      })
+      if (result.response !== 0) return
+    }
+    app.quit()
+  })
 }
 
 app.whenReady().then(async () => {
