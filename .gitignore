@@ -9,4 +9,6 @@ dist
 examples/
 settings.json
 card.vault.json
+click-dumps
+scout-logs
 

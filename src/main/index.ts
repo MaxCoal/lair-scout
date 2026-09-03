@@ -139,6 +139,7 @@ function registerIpc(): void {
   ipcMain.handle('fullAuto:get', () => scoutManager.getFullAuto())
   ipcMain.handle('fullAuto:arm', (_event, input: FullAutoArmInput) => scoutManager.armFullAuto(input))
   ipcMain.handle('fullAuto:disarm', () => scoutManager.disarmFullAuto())
+  ipcMain.handle('scout:logs', () => scoutManager.getScoutLogs())
   ipcMain.handle('app:quit', async () => {
     const activeCount = scoutManager.activeCount()
     if (activeCount > 0) {

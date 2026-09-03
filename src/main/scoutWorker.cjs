@@ -4,7 +4,8 @@ delete process.env.PLAYWRIGHT_BROWSERS_PATH
 delete process.env.ELECTRON_RUN_AS_NODE
 
 const { chromium } = require('playwright')
-const { mkdir, rm } = require('node:fs/promises')
+const { mkdir, rm, writeFile } = require('node:fs/promises')
+const { join } = require('node:path')
 const { execFileSync } = require('node:child_process')
 const readline = require('node:readline')
 
@@ -28,13 +29,50 @@ let focusedId = null
 let shuttingDown = false
 let ticking = false
 let spawning = false
-let shippingProfile = { name: '', address: '', phone: '', email: '' }
+let shippingProfile = {
+  name: '',
+  firstName: '',
+  lastName: '',
+  address: '',
+  address1: '',
+  address2: '',
+  city: '',
+  state: '',
+  zip: '',
+  country: 'US',
+  phone: '',
+  email: ''
+}
 let paymentProfile = { holderName: '', number: '', expiry: '', cvv: '' }
 let autoQty = 1
 let autoAborted = false
+let debugDumps = false
+let dumpDir = ''
+let dumpSeq = 0
+let autoProductUrl = ''
 
 function send(message) {
   process.stdout.write(`${JSON.stringify(message)}\n`)
+}
+
+function trace(fox, step, detail) {
+  let url = ''
+  try {
+    url = (fox && pageOf(fox) && pageOf(fox).url()) || ''
+  } catch {
+    url = ''
+  }
+  send({
+    type: 'event',
+    event: 'scoutLog',
+    payload: {
+      foxId: fox && fox.id ? String(fox.id) : '',
+      at: Date.now(),
+      step: String(step || ''),
+      detail: detail == null ? '' : String(detail),
+      url
+    }
+  })
 }
 
 function hostOf(url) {
@@ -516,86 +554,200 @@ function getBrowserPid(context) {
   }
 }
 
+function readShipping(profile) {
+  const src = profile && typeof profile === 'object' ? profile : {}
+  return {
+    name: String(src.name || ''),
+    firstName: String(src.firstName || ''),
+    lastName: String(src.lastName || ''),
+    address: String(src.address || ''),
+    address1: String(src.address1 || ''),
+    address2: String(src.address2 || ''),
+    city: String(src.city || ''),
+    state: String(src.state || ''),
+    zip: String(src.zip || ''),
+    country: String(src.country || 'US') || 'US',
+    phone: String(src.phone || ''),
+    email: String(src.email || '')
+  }
+}
+
 function parseAddress(profile) {
-  const name = String(profile?.name || '').trim()
-  const raw = String(profile?.address || '').trim()
+  const src = readShipping(profile)
+  const raw = src.address.trim()
   const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+  const name = src.name.trim()
   const bits = name.split(/\s+/).filter(Boolean)
-  let street = lines[0] || raw
-  let street2 = ''
-  let city = ''
-  let state = ''
-  let zip = ''
+  let street = src.address1.trim() || lines[0] || raw
+  let street2 = src.address2.trim()
+  let city = src.city.trim()
+  let state = src.state.trim()
+  let zip = src.zip.trim()
   const last = lines[lines.length - 1] || ''
   const cityStateZip = last.match(/^(.+?),\s*([A-Za-z]{2})\s+(\d{5}(?:-\d{4})?)$/)
-  if (cityStateZip) {
-    city = cityStateZip[1]
-    state = cityStateZip[2].toUpperCase()
-    zip = cityStateZip[3]
-    if (lines.length === 1) {
-      street = last.slice(0, last.length - cityStateZip[0].length).replace(/,\s*$/, '').trim() || street
-    } else {
-      street = lines[0]
-      if (lines.length > 2) street2 = lines.slice(1, -1).join(', ')
+  if (!src.address1) {
+    if (cityStateZip) {
+      if (!city) city = cityStateZip[1]
+      if (!state) state = cityStateZip[2].toUpperCase()
+      if (!zip) zip = cityStateZip[3]
+      if (lines.length === 1) {
+        street = last.slice(0, last.length - cityStateZip[0].length).replace(/,\s*$/, '').trim() || street
+      } else {
+        street = lines[0]
+        if (!street2 && lines.length > 2) {
+          street2 = lines.slice(1, -1).filter((line) => line.toLowerCase() !== street.toLowerCase()).join(', ')
+        }
+      }
+    } else if (!street2 && lines.length > 1) {
+      street2 = lines.slice(1).filter((line) => line.toLowerCase() !== street.toLowerCase()).join(', ')
     }
-  } else if (lines.length > 1) {
-    street2 = lines.slice(1).join(', ')
+  } else if (!city && cityStateZip) {
+    city = cityStateZip[1]
+    state = state || cityStateZip[2].toUpperCase()
+    zip = zip || cityStateZip[3]
   }
+  if (street2 && street2.toLowerCase() === street.toLowerCase()) street2 = ''
   return {
     name,
-    firstName: bits[0] || '',
-    lastName: bits.slice(1).join(' ') || '',
+    firstName: src.firstName.trim() || bits[0] || '',
+    lastName: src.lastName.trim() || bits.slice(1).join(' ') || '',
     street,
     street2,
     city,
     state,
     zip,
-    address: raw,
-    phone: String(profile?.phone || '').trim(),
-    email: String(profile?.email || '').trim()
+    address: raw || street,
+    phone: src.phone.trim(),
+    phoneDigits: src.phone.replace(/\D/g, ''),
+    email: src.email.trim(),
+    country: /^(united states|usa?)$/i.test(src.country) ? 'US' : src.country || 'US'
   }
 }
 
 function fillProfileInPage(data) {
-  if (!data || (!data.name && !data.street && !data.address)) return 0
-  const setValue = (el, value) => {
-    if (!el || !value || el.disabled || el.readOnly) return false
-    if (document.activeElement === el) return false
+  if (!data || (!data.name && !data.street && !data.address && !data.email)) return 0
+  const notifyNg = (el) => {
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+    el.dispatchEvent(new Event('change', { bubbles: true }))
+    el.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }))
+    el.dispatchEvent(new Event('blur', { bubbles: true }))
+    try {
+      const ng = window.angular
+      if (!ng) return
+      const ae = ng.element(el)
+      ae.triggerHandler('input')
+      ae.triggerHandler('change')
+      ae.triggerHandler('blur')
+      const scope = ae.scope()
+      if (scope && !scope.$$phase) scope.$apply()
+    } catch {
+      /* native events only */
+    }
+  }
+  const setValue = (el, value, allowEmpty) => {
+    if (!el || el.disabled || el.readOnly) return false
+    if ((value == null || value === '') && !allowEmpty) return false
+    const next = value == null ? '' : String(value)
     const tag = el.tagName
     if (tag === 'SELECT') {
-      const want = String(value).toLowerCase()
+      if (!next && allowEmpty) return false
+      const want = next.toLowerCase()
       const opt = [...el.options].find(
-        (item) => item.value.toLowerCase() === want || item.text.toLowerCase() === want || item.value.toLowerCase() === want.slice(0, 2)
+        (item) =>
+          item.value.toLowerCase() === want ||
+          item.text.toLowerCase() === want ||
+          item.value.toLowerCase() === want.slice(0, 2) ||
+          item.text.toLowerCase().startsWith(want)
       )
       if (!opt) return false
       el.value = opt.value
+      opt.selected = true
     } else {
       const proto = tag === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
       const desc = Object.getOwnPropertyDescriptor(proto, 'value')
-      if (desc && desc.set) desc.set.call(el, value)
-      else el.value = value
+      if (desc && desc.set) desc.set.call(el, next)
+      else el.value = next
     }
-    el.dispatchEvent(new Event('input', { bubbles: true }))
-    el.dispatchEvent(new Event('change', { bubbles: true }))
+    notifyNg(el)
     return true
   }
+  const labelText = (el) => {
+    const bits = []
+    if (el.id) {
+      const lab = document.querySelector(`label[for="${CSS.escape(el.id)}"]`)
+      if (lab) bits.push(lab.innerText || '')
+    }
+    const wrap = el.closest('label')
+    if (wrap) bits.push(wrap.innerText || '')
+    const labelled = el.getAttribute('aria-labelledby')
+    if (labelled) {
+      for (const id of labelled.split(/\s+/)) {
+        const node = document.getElementById(id)
+        if (node) bits.push(node.innerText || '')
+      }
+    }
+    const parent = el.parentElement
+    if (parent) {
+      const near = parent.querySelector('label, .label, [class*="label"], legend')
+      if (near) bits.push(near.innerText || '')
+    }
+    return bits.join(' ')
+  }
   const blobOf = (el) =>
-    [el.id, el.name, el.placeholder, el.getAttribute('aria-label'), el.autocomplete, el.getAttribute('ng-model'), el.getAttribute('data-internal-id')]
+    [
+      el.id,
+      el.name,
+      el.placeholder,
+      el.getAttribute('aria-label'),
+      el.autocomplete,
+      el.getAttribute('ng-model'),
+      el.getAttribute('formcontrolname'),
+      el.getAttribute('data-internal-id'),
+      labelText(el)
+    ]
       .filter(Boolean)
       .join(' ')
       .toLowerCase()
   let filled = 0
+  const street = String(data.street || '').slice(0, 25)
+  const street2 = String(data.street2 || '').slice(0, 25)
+  const phone = String(data.phoneDigits || data.phone || '').replace(/\D/g, '')
+  const byInternal = [
+    ['cart-shipping-email', data.email],
+    ['cart-shipping-fname', data.firstName],
+    ['cart-shipping-lname', data.lastName],
+    ['cart-shipping-address', street],
+    ['cart-shipping-address2', street2],
+    ['cart-shipping-city', data.city],
+    ['cart-shipping-zipcode', data.zip],
+    ['cart-shipping-phone', phone],
+    ['cart-shipping-country', data.country || 'US'],
+    ['cart-shipping-state', data.state]
+  ]
+  for (const [id, value] of byInternal) {
+    const el = document.querySelector(`[data-internal-id="${id}"]`)
+    if (!el) continue
+    if (id === 'cart-shipping-address2') {
+      filled += setValue(el, street2, true) ? 1 : 0
+      continue
+    }
+    if (!value) continue
+    filled += setValue(el, value) ? 1 : 0
+  }
   const nodes = [...document.querySelectorAll('input, textarea, select')]
   for (const el of nodes) {
     const type = (el.getAttribute('type') || 'text').toLowerCase()
     if (['hidden', 'checkbox', 'radio', 'password', 'submit', 'button', 'file'].includes(type)) continue
+    const id = (el.id || '').toLowerCase()
+    if (/newsletter|waiting-list|waiting_list/.test(id)) continue
     const blob = blobOf(el)
-    if (/email/.test(blob)) {
-      if (data.email) filled += setValue(el, data.email) ? 1 : 0
+    const isLine2 = /address[-_\s]?(line[-_\s]?)?2|address2|\bapt\b|\bsuite\b|\bunit\b|shipping-address2/.test(blob)
+    if (type === 'email' || /e-?mail/.test(blob)) {
+      if (data.email && !/newsletter/.test(blob)) filled += setValue(el, data.email) ? 1 : 0
       continue
     }
-    const isFirst = /first[-_\s]?name|given[-_\s]?name/.test(blob)
-    const isLast = /last[-_\s]?name|family[-_\s]?name|surname/.test(blob)
+    const isFirst = /first[-_\s]?name|firstname|given[-_\s]?name|\bfname\b|shipping-fname/.test(blob)
+    const isLast = /last[-_\s]?name|lastname|family[-_\s]?name|surname|\blname\b|shipping-lname/.test(blob)
     const isFullName =
       /full[-_\s]?name|customer[-_\s]?name|shipping[-_\s]?name|ship[-_\s]?name|billing[-_\s]?name/.test(blob) ||
       el.autocomplete === 'name' ||
@@ -603,21 +755,22 @@ function fillProfileInPage(data) {
     if (isFirst && data.firstName) filled += setValue(el, data.firstName) ? 1 : 0
     else if (isLast && data.lastName) filled += setValue(el, data.lastName) ? 1 : 0
     else if (isFullName && !/user|login|account|company|card/.test(blob) && data.name) filled += setValue(el, data.name) ? 1 : 0
-    else if (/address[-_\s]?(line[-_\s]?)?2|address2|apt|suite|unit/.test(blob) && data.street2) filled += setValue(el, data.street2) ? 1 : 0
-    else if (/street|address[-_\s]?(line[-_\s]?)?1|address1|(^|[-_\s])address($|[-_\s])/.test(blob) && data.street)
-      filled += setValue(el, data.street) ? 1 : 0
+    else if (isLine2) filled += setValue(el, street2, true) ? 1 : 0
+    else if (/street|address[-_\s]?(line[-_\s]?)?1|address1|address line 1|(^|[-_\s])address($|[-_\s])/.test(blob) && street)
+      filled += setValue(el, street) ? 1 : 0
     else if (/city|town|locality/.test(blob) && data.city) filled += setValue(el, data.city) ? 1 : 0
+    else if (/country/.test(blob) && (data.country || 'US')) filled += setValue(el, data.country || 'US') ? 1 : 0
     else if (/state|province|region/.test(blob) && data.state) filled += setValue(el, data.state) ? 1 : 0
-    else if (/zip|postal|postcode/.test(blob) && data.zip) filled += setValue(el, data.zip) ? 1 : 0
-    else if (/phone|mobile|telephone|tel\b/.test(blob) && data.phone) filled += setValue(el, data.phone) ? 1 : 0
+    else if (/zip|postal|postcode|zipcode/.test(blob) && data.zip) filled += setValue(el, data.zip) ? 1 : 0
+    else if (/phone|mobile|telephone|tel\b/.test(blob) && phone) filled += setValue(el, phone) ? 1 : 0
   }
   return filled
 }
 
 async function applyShippingToFox(fox) {
   const page = pageOf(fox)
-  if (!page || (!shippingProfile.name && !shippingProfile.address && !shippingProfile.email)) return
-  await page.evaluate(fillProfileInPage, parseAddress(shippingProfile)).catch(() => 0)
+  if (!page || (!shippingProfile.name && !shippingProfile.address && !shippingProfile.address1 && !shippingProfile.email)) return
+  await evaluateAllFrames(page, fillProfileInPage, parseAddress(shippingProfile))
 }
 
 function hookProfile(fox) {
@@ -897,31 +1050,192 @@ function setRushLabel(fox, label) {
   emitUpdate()
 }
 
+async function evaluateAnyFrame(page, fn) {
+  for (const frame of page.frames()) {
+    const ok = await frame.evaluate(fn).catch(() => false)
+    if (ok) return true
+  }
+  return false
+}
+
+async function evaluateAllFrames(page, fn, arg) {
+  let total = 0
+  for (const frame of page.frames()) {
+    total += Number(await frame.evaluate(fn, arg).catch(() => 0)) || 0
+  }
+  return total
+}
+
 async function clickByScript(page, fn, timeoutMs) {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     if (autoAborted) throw new Error('Full Auto aborted')
-    const ok = await page.evaluate(fn).catch(() => false)
-    if (ok) return true
+    if (await evaluateAnyFrame(page, fn)) return true
     await wait(150)
   }
   return false
 }
 
+async function clickByRole(page, pattern, timeoutMs) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (autoAborted) throw new Error('Full Auto aborted')
+    for (const frame of page.frames()) {
+      try {
+        const loc = frame.getByRole('button', { name: pattern }).first()
+        if (!(await loc.isVisible().catch(() => false))) continue
+        await loc.click({ timeout: 3000 })
+        return true
+      } catch {
+        /* try next frame */
+      }
+    }
+    await wait(150)
+  }
+  return false
+}
+
+function scriptOnCart() {
+  function shown(el) {
+    if (!el) return false
+    const r = el.getBoundingClientRect()
+    if (r.width < 8 || r.height < 8) return false
+    if (r.bottom < 0 || r.right < 0 || r.top > innerHeight || r.left > innerWidth) return false
+    let node = el
+    while (node && node.nodeType === 1) {
+      const s = getComputedStyle(node)
+      if (s.display === 'none' || s.visibility === 'hidden' || Number(s.opacity) === 0) return false
+      node = node.parentElement
+    }
+    return true
+  }
+  const nodes = [...document.querySelectorAll('button, a, input[type="submit"], [role="button"]')]
+  return nodes.some((el) => {
+    if (el.disabled || !shown(el)) return false
+    const text = (el.innerText || el.value || el.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim()
+    return /secure checkout/i.test(text)
+  })
+}
+
+function scriptOnShipping() {
+  if (document.querySelector('#cart-shipping-email, #cart-shipping-fname, [data-internal-id="cart-shipping-email"], [data-internal-id="cart-shipping-fname"]')) {
+    return true
+  }
+  const heading = document.body?.innerText || ''
+  if (/\bshipping\b/i.test(heading) && /first name/i.test(heading) && /e-?mail/i.test(heading)) return true
+  const nodes = [...document.querySelectorAll('input, textarea, select')]
+  let email = false
+  let first = false
+  for (const el of nodes) {
+    const blob = [el.id, el.name, el.placeholder, el.getAttribute('aria-label'), el.autocomplete, el.getAttribute('data-internal-id')].filter(Boolean).join(' ').toLowerCase()
+    if ((el.getAttribute('type') || '').toLowerCase() === 'email' || /e-?mail/.test(blob)) email = true
+    if (/first[-_\s]?name|firstname|given[-_\s]?name|\bfname\b/.test(blob)) first = true
+  }
+  return email && first
+}
+
+function scriptClickSecureCheckout() {
+  function shown(el) {
+    if (!el) return false
+    const r = el.getBoundingClientRect()
+    if (r.width < 8 || r.height < 8) return false
+    if (r.bottom < 0 || r.right < 0 || r.top > innerHeight || r.left > innerWidth) return false
+    let node = el
+    while (node && node.nodeType === 1) {
+      const s = getComputedStyle(node)
+      if (s.display === 'none' || s.visibility === 'hidden' || Number(s.opacity) === 0) return false
+      node = node.parentElement
+    }
+    return true
+  }
+  function fire(el) {
+    el.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true, view: window }))
+    el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }))
+    el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }))
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }))
+    el.click()
+  }
+  const pool = [...document.querySelectorAll('button, a, input[type="submit"], [role="button"]')]
+  const matches = pool.filter((el) => {
+    if (el.disabled || !shown(el)) return false
+    const text = (el.innerText || el.value || el.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim()
+    return /secure checkout/i.test(text)
+  })
+  if (!matches.length) return false
+  matches.sort((a, b) => b.getBoundingClientRect().width * b.getBoundingClientRect().height - a.getBoundingClientRect().width * a.getBoundingClientRect().height)
+  matches[0].scrollIntoView({ block: 'center', inline: 'nearest' })
+  fire(matches[0])
+  return true
+}
+
+function listClickTargets() {
+  function shown(el) {
+    const r = el.getBoundingClientRect()
+    if (r.width < 4 || r.height < 4) return false
+    const s = getComputedStyle(el)
+    return s.display !== 'none' && s.visibility !== 'hidden' && Number(s.opacity) > 0
+  }
+  return [...document.querySelectorAll('button, a, input[type=submit], input[type=button], [role=button], [sf-checkout]')]
+    .filter(shown)
+    .map((el) => ({
+      tag: el.tagName.toLowerCase(),
+      id: el.id || '',
+      className: String(el.className || '').slice(0, 160),
+      name: el.getAttribute('name') || '',
+      aria: el.getAttribute('aria-label') || '',
+      text: (el.innerText || el.value || '').replace(/\s+/g, ' ').trim().slice(0, 160),
+      href: el.getAttribute('href') || ''
+    }))
+    .filter((item) => item.text || item.aria || item.id)
+}
+
+async function dumpPage(fox, page, step) {
+  if (!debugDumps || !dumpDir || !page) return
+  dumpSeq += 1
+  const safe = String(step).replace(/[^\w.-]+/g, '_')
+  const base = `${String(dumpSeq).padStart(3, '0')}-scout${fox.id}-${safe}`
+  try {
+    await mkdir(dumpDir, { recursive: true })
+    const html = await page.content().catch(() => '')
+    await writeFile(join(dumpDir, `${base}.html`), html, 'utf8')
+    const meta = {
+      step,
+      url: page.url(),
+      title: await page.title().catch(() => ''),
+      at: new Date().toISOString(),
+      targets: await page.evaluate(listClickTargets).catch(() => [])
+    }
+    await writeFile(join(dumpDir, `${base}.json`), `${JSON.stringify(meta, null, 2)}\n`, 'utf8')
+    const frames = page.frames()
+    for (let i = 0; i < frames.length; i++) {
+      const frame = frames[i]
+      if (frame === page.mainFrame()) continue
+      const fhtml = await frame.content().catch(() => '')
+      if (fhtml && fhtml.length > 80) {
+        await writeFile(join(dumpDir, `${base}-frame${i}.html`), fhtml, 'utf8')
+      }
+    }
+  } catch (error) {
+    process.stderr.write(`[dump ${step}] ${error instanceof Error ? error.message : error}\n`)
+  }
+}
+
 function scriptClickAdd() {
   const cookie = document.querySelector('#onetrust-accept-btn-handler')
   if (cookie && cookie.offsetParent) cookie.click()
-  const nodes = [
+  const preferred = [
     ...document.querySelectorAll(
-      '#buy_button_container button[data-internal-id^="add-to-cart-"], button.buy-link[data-internal-id^="add-to-cart-"], button.buy-link'
+      '#buy_button_container button.buy-link, button.buy-link.buy-link-with-qtyselect, button.buy-link.btn-primary.btn-lg'
     )
-  ]
-  const extra = [...document.querySelectorAll('button, a.btn, a[role="button"]')]
-  const pool = [...nodes, ...extra]
+  ].filter((el) => !el.classList.contains('buy-link-candy'))
+  const extra = [...document.querySelectorAll('button.buy-link, a.buy-link')].filter(
+    (el) => !el.classList.contains('buy-link-candy') && !el.closest('.slick-slide, .product-carousel, [class*="recommend"]')
+  )
+  const pool = preferred.length ? preferred : extra
   const matches = pool.filter((el) => {
     if (el.disabled) return false
     const text = (el.innerText || el.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim()
-    if (!/preorder now|add to cart/i.test(text)) return false
+    if (text && !/preorder now|add to cart/i.test(text)) return false
     const r = el.getBoundingClientRect()
     const s = getComputedStyle(el)
     return r.width > 24 && r.height > 16 && s.visibility !== 'hidden' && s.display !== 'none' && Number(s.opacity) > 0
@@ -1003,33 +1317,104 @@ function scriptClickGuest() {
   return true
 }
 
+function scriptMainAddReady() {
+  const el = document.querySelector(
+    '#buy_button_container button.buy-link, button.buy-link.buy-link-with-qtyselect, button.buy-link.btn-primary.btn-lg'
+  )
+  if (!el || el.disabled || el.classList.contains('buy-link-candy')) return false
+  const r = el.getBoundingClientRect()
+  return r.width > 40 && r.height > 16
+}
+
 async function runRushCheckout(fox, page) {
   if (isOnQueue(page.url())) return
 
-  setRushLabel(fox, 'Adding to cart…')
-  if (!(await clickByScript(page, scriptClickAdd, 12000))) {
-    throw new Error('Could not find Preorder now / Add to cart')
-  }
+  const alreadyCart = await evaluateAnyFrame(page, scriptOnCart)
+  if (!alreadyCart) {
+    setRushLabel(fox, 'Waiting for add to cart…')
+    const readyUntil = Date.now() + 12000
+    while (Date.now() < readyUntil) {
+      throwIfAborted()
+      if (await page.evaluate(scriptMainAddReady).catch(() => false)) break
+      await wait(150)
+    }
+    await dumpPage(fox, page, 'before-add-to-cart')
+    setRushLabel(fox, 'Adding to cart…')
+    const added = await clickByScript(page, scriptClickAdd, 12000)
+    trace(fox, 'add-to-cart', added ? 'clicked' : 'miss')
+    await dumpPage(fox, page, added ? 'after-add-to-cart' : 'miss-add-to-cart')
+    if (!added && !(await evaluateAnyFrame(page, scriptOnCart))) {
+      throw new Error('Could not find Preorder now / Add to cart')
+    }
 
-  setRushLabel(fox, 'Proceeding to cart…')
-  await wait(400)
-  if (!(await clickByScript(page, scriptClickProceed, 16000))) {
-    throw new Error('Could not find Proceed to Cart')
+    if (!(await evaluateAnyFrame(page, scriptOnCart))) {
+      setRushLabel(fox, 'Proceeding to cart…')
+      await wait(400)
+      await dumpPage(fox, page, 'before-proceed-to-cart')
+      const proceeded = await clickByScript(page, scriptClickProceed, 16000)
+      trace(fox, 'proceed-to-cart', proceeded ? 'clicked' : 'miss')
+      await dumpPage(fox, page, proceeded ? 'after-proceed-to-cart' : 'miss-proceed-to-cart')
+      if (!proceeded && !(await evaluateAnyFrame(page, scriptOnCart))) {
+        throw new Error('Could not find Proceed to Cart')
+      }
+    }
   }
 
   if (isOnQueue(page.url())) return
 
-  setRushLabel(fox, 'Continue as guest…')
-  const guestClicked = await clickByScript(page, scriptClickGuest, 20000)
-  if (!guestClicked && !isOnQueue(page.url()) && !/\/cart|checkout/i.test(page.url())) {
-    throw new Error('Could not find Continue as guest')
+  if (!(await evaluateAnyFrame(page, scriptOnCart))) {
+    setRushLabel(fox, 'Continue as guest…')
+    await dumpPage(fox, page, 'before-guest')
+    const guestClicked = await clickByScript(page, scriptClickGuest, 8000)
+    trace(fox, 'guest', guestClicked ? 'clicked' : 'miss')
+    await dumpPage(fox, page, guestClicked ? 'after-guest' : 'miss-guest')
+    if (!guestClicked && !isOnQueue(page.url()) && !/\/cart|checkout/i.test(page.url()) && !(await evaluateAnyFrame(page, scriptOnCart))) {
+      throw new Error('Could not find Continue as guest')
+    }
+    await wait(600)
+    await evaluateAllFrames(page, fillProfileInPage, parseAddress(shippingProfile))
   }
 
-  await wait(600)
-  await page.evaluate(fillProfileInPage, parseAddress(shippingProfile)).catch(() => 0)
+  if (isOnQueue(page.url())) {
+    setRushLabel(fox, 'Waiting in queue…')
+    return
+  }
 
-  setRushLabel(fox, 'Waiting in queue…')
-  await page.waitForURL(/storequeue\.wizards\.com|queue-it\.net|queueittoken=/i, { timeout: 60000 }).catch(() => undefined)
+  setRushLabel(fox, 'Waiting for checkout…')
+  const stageUntil = Date.now() + 20000
+  while (Date.now() < stageUntil) {
+    throwIfAborted()
+    if (isOnQueue(page.url())) {
+      setRushLabel(fox, 'Waiting in queue…')
+      return
+    }
+    if (await evaluateAnyFrame(page, scriptOnShipping)) {
+      setRushLabel(fox, 'On shipping…')
+      await dumpPage(fox, page, 'on-shipping')
+      return
+    }
+    if (await evaluateAnyFrame(page, scriptOnCart) || /\/cart/i.test(page.url())) {
+      break
+    }
+    await wait(200)
+  }
+
+  const needsSecure = await evaluateAnyFrame(page, scriptOnCart)
+  if (needsSecure || /\/cart/i.test(page.url())) {
+    setRushLabel(fox, 'Secure checkout…')
+    await dumpPage(fox, page, 'before-secure-checkout')
+    const clicked =
+      (await clickByScript(page, scriptClickSecureCheckout, 8000)) ||
+      (await clickByRole(page, /secure checkout/i, 4000))
+    trace(fox, 'secure-checkout', clicked ? 'clicked' : 'miss')
+    await dumpPage(fox, page, clicked ? 'after-secure-checkout' : 'miss-secure-checkout')
+    return
+  }
+
+  if (isOnQueue(page.url())) {
+    setRushLabel(fox, 'Waiting in queue…')
+    return
+  }
 }
 
 async function rushCheckoutFox(fox) {
@@ -1085,14 +1470,15 @@ function scrapeProductLinks() {
     if (seen.has(url)) continue
     seen.add(url)
     let title = (a.getAttribute('aria-label') || a.getAttribute('title') || a.innerText || '').replace(/\s+/g, ' ').trim()
-    if (title.length < 4) {
+    if (title.length < 8 || /^(foil|non[-\s]?foil)$/i.test(title)) {
       const card = a.closest('article, li, .product, .card, [class*="product"]')
       const heading = card?.querySelector('h1, h2, h3, h4, .product-title, .title, [class*="title"]')
-      title = (heading?.innerText || title).replace(/\s+/g, ' ').trim()
+      const fromCard = (heading?.innerText || '').replace(/\s+/g, ' ').trim()
+      if (fromCard.length > title.length) title = fromCard
     }
-    if (!title) {
+    if (!title || title.length < 8 || /^(foil|non[-\s]?foil)$/i.test(title)) {
       const slug = url.split('/').filter(Boolean).pop() || ''
-      title = decodeURIComponent(slug).replace(/-/g, ' ')
+      if (slug && !/^\d+$/.test(slug)) title = decodeURIComponent(slug).replace(/-/g, ' ')
     }
     out.push({ url, title })
   }
@@ -1129,7 +1515,7 @@ function setQtyInPage(n) {
     const type = (el.getAttribute('type') || 'text').toLowerCase()
     if (['hidden', 'checkbox', 'radio', 'password', 'submit', 'button', 'file'].includes(type)) continue
     const blob = blobOf(el)
-    const isQty = type === 'number' || /qty|quantity/i.test(blob)
+    const isQty = /qty|quantity/i.test(blob) || /qty|quantity/i.test(el.className || '')
     if (!isQty) continue
     const r = el.getBoundingClientRect()
     if (r.width < 8 || r.height < 8) continue
@@ -1153,7 +1539,7 @@ function readCartQtyOk(n) {
   for (const el of nodes) {
     const type = (el.getAttribute('type') || 'text').toLowerCase()
     const blob = blobOf(el)
-    if (type !== 'number' && !/qty|quantity/i.test(blob)) continue
+    if (!/qty|quantity/i.test(blob)) continue
     const r = el.getBoundingClientRect()
     if (r.width < 8 || r.height < 8) continue
     found = true
@@ -1165,13 +1551,15 @@ function readCartQtyOk(n) {
 
 function parseCardExpiry(raw) {
   const text = String(raw || '').trim()
-  const match = text.match(/(\d{1,2})\s*[/\-]\s*(\d{2,4})/)
-  if (!match) return { month: '', year: '', yearLong: '', combined: text }
+  const compact = text.replace(/\D/g, '')
+  let match = text.match(/(\d{1,2})\s*[/\-]\s*(\d{2,4})/)
+  if (!match && compact.length >= 4) match = [text, compact.slice(0, 2), compact.slice(2, 4)]
+  if (!match) return { month: '', year: '', yearLong: '', combined: text, digits: compact }
   const month = match[1].padStart(2, '0')
   let year = match[2]
   const yearLong = year.length === 2 ? `20${year}` : year
   if (year.length === 4) year = year.slice(-2)
-  return { month, year, yearLong, combined: `${month} / ${year}` }
+  return { month, year, yearLong, combined: `${month}/${year}`, digits: `${month}${year}` }
 }
 
 function fillCardInPage(data) {
@@ -1204,6 +1592,8 @@ function fillCardInPage(data) {
   let filled = 0
   const nodes = [...document.querySelectorAll('input, textarea, select')]
   for (const el of nodes) {
+    if (el.id && /^encrypted/i.test(el.id)) continue
+    if (el.classList?.contains('autocomplete-field') || el.getAttribute('aria-hidden') === 'true') continue
     const type = (el.getAttribute('type') || 'text').toLowerCase()
     if (['hidden', 'checkbox', 'radio', 'submit', 'button', 'file'].includes(type)) continue
     const blob = blobOf(el)
@@ -1217,7 +1607,7 @@ function fillCardInPage(data) {
     else if (isHolder && data.holderName) filled += setValue(el, data.holderName) ? 1 : 0
     else if (isMonth && data.month) filled += setValue(el, data.month) ? 1 : 0
     else if (isYear && (data.yearLong || data.year)) filled += setValue(el, data.yearLong) || setValue(el, data.year) ? 1 : 0
-    else if (isExp && !isMonth && !isYear && data.combined) filled += setValue(el, data.combined) ? 1 : 0
+    else if (isExp && !isMonth && !isYear && (data.digits || data.combined)) filled += setValue(el, data.digits || data.combined) ? 1 : 0
     else if (isCvv && data.cvv) filled += setValue(el, data.cvv) ? 1 : 0
   }
   return filled
@@ -1235,7 +1625,7 @@ function scriptClickPlaceOrder() {
   const matches = pool.filter((el) => {
     if (el.disabled || !shown(el)) return false
     const text = (el.innerText || el.value || el.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim()
-    if (/add to cart|preorder|view cart|continue as guest/i.test(text)) return false
+    if (/add to cart|preorder|view cart|continue as guest|review order/i.test(text)) return false
     return /place order|pay now|submit order|complete (your )?order|confirm (purchase|order)|buy now/i.test(text)
   })
   if (!matches.length) return false
@@ -1251,6 +1641,129 @@ async function scrapeProductsFox(fox) {
   return { products: Array.isArray(products) ? products : [] }
 }
 
+async function fillShippingPlaywright(page, data) {
+  const pairs = [
+    [/e-?mail/i, data.email],
+    [/first name|given name/i, data.firstName],
+    [/last name|family name|surname/i, data.lastName],
+    [/^address line 1$/i, data.street],
+    [/city|town/i, data.city],
+    [/zip|postal/i, data.zip],
+    [/phone|mobile|telephone/i, data.phoneDigits || String(data.phone || '').replace(/\D/g, '')]
+  ]
+  const named = [
+    ['input[type="email"], input[autocomplete="email"], input[name="email"], input[formcontrolname="email"]', data.email],
+    ['input[autocomplete="given-name"], input[name="firstName"], input[formcontrolname="firstName"]', data.firstName],
+    ['input[autocomplete="family-name"], input[name="lastName"], input[formcontrolname="lastName"]', data.lastName],
+    ['input[autocomplete="address-line1"], input[name="address1"], input[formcontrolname="address1"]', data.street],
+    ['input[autocomplete="address-level2"], input[name="city"], input[formcontrolname="city"]', data.city],
+    ['input[autocomplete="postal-code"], input[name="postalCode"], input[name="zip"]', data.zip],
+    ['input[autocomplete="tel"], input[type="tel"], input[name="phone"], [data-internal-id="cart-shipping-phone"]', data.phoneDigits || String(data.phone || '').replace(/\D/g, '')],
+    ['[data-internal-id="cart-shipping-email"], #cart-shipping-email', data.email],
+    ['[data-internal-id="cart-shipping-fname"], #cart-shipping-fname', data.firstName],
+    ['[data-internal-id="cart-shipping-lname"], #cart-shipping-lname', data.lastName],
+    ['[data-internal-id="cart-shipping-address"], #cart-shipping-address', data.street],
+    ['[data-internal-id="cart-shipping-city"], #cart-shipping-city', data.city],
+    ['[data-internal-id="cart-shipping-zipcode"], #cart-shipping-zipcode', data.zip]
+  ]
+  const line2Sel =
+    '[data-internal-id="cart-shipping-address2"], #cart-shipping-address2, input[autocomplete="address-line2"], input[name="address2"]'
+  for (const frame of page.frames()) {
+    for (const [pattern, value] of pairs) {
+      if (!value) continue
+      const loc = frame.getByLabel(pattern).first()
+      const visible = await loc.isVisible().catch(() => false)
+      if (!visible) continue
+      await loc.click({ force: true }).catch(() => undefined)
+      await loc.fill('').catch(() => undefined)
+      await loc.fill(String(value)).catch(async () => {
+        await loc.pressSequentially(String(value), { delay: 10 }).catch(() => undefined)
+      })
+    }
+    for (const [sel, value] of named) {
+      if (!value) continue
+      const loc = frame.locator(sel).first()
+      const visible = await loc.isVisible().catch(() => false)
+      if (!visible) continue
+      await loc.click({ force: true }).catch(() => undefined)
+      await loc.fill(String(value)).catch(async () => {
+        await loc.pressSequentially(String(value), { delay: 10 }).catch(() => undefined)
+      })
+    }
+    const line2 = frame.locator(line2Sel).first()
+    if (await line2.isVisible().catch(() => false)) {
+      if (data.street2) {
+        await line2.fill(String(data.street2)).catch(() => undefined)
+      } else {
+        await line2.fill('').catch(() => undefined)
+      }
+    }
+    if (data.state) {
+      const region = frame.getByLabel(/region|state|province/i).first()
+      if (await region.isVisible().catch(() => false)) {
+        await region.selectOption({ label: data.state }).catch(async () => {
+          await region.selectOption({ value: data.state }).catch(async () => {
+            await region.fill(String(data.state)).catch(() => undefined)
+          })
+        })
+      }
+    }
+    const country = frame.locator('[data-internal-id="cart-shipping-country"]').first()
+    if (await country.isVisible().catch(() => false)) {
+      await country.selectOption({ value: data.country || 'US' }).catch(async () => {
+        await country.selectOption({ label: /united states/i }).catch(() => undefined)
+      })
+    }
+  }
+}
+
+function scriptClickContinue() {
+  function shown(el) {
+    if (!el) return false
+    const r = el.getBoundingClientRect()
+    if (r.width < 8 || r.height < 8) return false
+    const s = getComputedStyle(el)
+    return s.display !== 'none' && s.visibility !== 'hidden' && Number(s.opacity) > 0
+  }
+  const pool = [...document.querySelectorAll('button, input[type="submit"], a[role="button"], a.btn')]
+  const matches = pool.filter((el) => {
+    if (el.disabled || !shown(el)) return false
+    const text = (el.innerText || el.value || el.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim()
+    if (/continue as guest|continue shopping|add to cart|secure checkout|return to cart|return to shipping/i.test(text)) return false
+    return /^(continue|next)$/i.test(text) || /continue to (shipping|payment|billing|review)/i.test(text) || /review order/i.test(text)
+  })
+  if (!matches.length) {
+    const byId = [...document.querySelectorAll('button[data-internal-id="cart-continue"], button[data-internal-id="cart-continue-creditcard"]')].filter(
+      (el) => shown(el) && !el.disabled
+    )
+    if (!byId.length) return false
+    byId[0].click()
+    return true
+  }
+  matches[0].click()
+  return true
+}
+
+async function typeCardField(frame, selectors, value, { digitsOnly = false } = {}) {
+  if (!value) return false
+  const typed = digitsOnly ? String(value).replace(/\D/g, '') : String(value)
+  if (!typed) return false
+  for (const sel of selectors) {
+    const loc = frame.locator(sel).first()
+    const visible = await loc.isVisible().catch(() => false)
+    if (!visible) continue
+    await loc.click({ force: true }).catch(() => undefined)
+    await loc.press('Control+A').catch(() => undefined)
+    await loc.press('Meta+A').catch(() => undefined)
+    await loc.press('Backspace').catch(() => undefined)
+    await loc.pressSequentially(typed, { delay: 40 }).catch(async () => {
+      await loc.fill(typed).catch(() => undefined)
+    })
+    return true
+  }
+  return false
+}
+
 async function fillPaymentOnPage(page) {
   const expiry = parseCardExpiry(paymentProfile.expiry)
   const data = {
@@ -1260,30 +1773,22 @@ async function fillPaymentOnPage(page) {
     month: expiry.month,
     year: expiry.year,
     yearLong: expiry.yearLong,
-    combined: expiry.combined
+    combined: expiry.combined,
+    digits: expiry.digits
   }
   for (const frame of page.frames()) {
     await frame.evaluate(fillCardInPage, data).catch(() => 0)
   }
-  const tries = [
-    { selectors: ['input[autocomplete="cc-number"]', 'input[name="cardnumber"]', 'input[id*="cardNumber" i]', '#cardNumber'], value: data.number },
-    { selectors: ['input[autocomplete="cc-exp"]', 'input[name="exp-date"]', 'input[id*="exp" i]'], value: data.combined },
-    { selectors: ['input[autocomplete="cc-csc"]', 'input[name="cvc"]', 'input[name="cvv"]', 'input[id*="cvv" i]', 'input[id*="cvc" i]'], value: data.cvv },
-    { selectors: ['input[autocomplete="cc-name"]', 'input[name*="cardholder" i]', 'input[id*="cardName" i]'], value: data.holderName }
-  ]
-  for (const tryFill of tries) {
-    if (!tryFill.value) continue
-    for (const frame of page.frames()) {
-      for (const sel of tryFill.selectors) {
-        const loc = frame.locator(sel).first()
-        const visible = await loc.isVisible().catch(() => false)
-        if (!visible) continue
-        await loc.click({ force: true }).catch(() => undefined)
-        await loc.fill(tryFill.value).catch(async () => {
-          await loc.pressSequentially(String(tryFill.value), { delay: 15 }).catch(() => undefined)
-        })
-      }
-    }
+  for (const frame of page.frames()) {
+    await typeCardField(frame, ['#encryptedCardNumber', 'input[data-fieldtype="encryptedCardNumber"]', 'input[autocomplete="cc-number"]:not(.autocomplete-field)', 'input[name="cardnumber"]'], data.number)
+    await typeCardField(
+      frame,
+      ['#encryptedExpiryDate', 'input[data-fieldtype="encryptedExpiryDate"]', 'input[aria-label="Expiry date"]', 'input[autocomplete="cc-exp"]:not(.autocomplete-field)'],
+      data.digits || data.combined,
+      { digitsOnly: true }
+    )
+    await typeCardField(frame, ['#encryptedSecurityCode', 'input[data-fieldtype="encryptedSecurityCode"]', 'input[autocomplete="cc-csc"]:not(.autocomplete-field)', 'input[name="cvv"]', 'input[name="cvc"]'], data.cvv, { digitsOnly: true })
+    await typeCardField(frame, ['input[autocomplete="cc-name"]:not(.autocomplete-field)', 'input[name*="cardholder" i]'], data.holderName)
   }
 }
 
@@ -1291,16 +1796,14 @@ async function waitForConfirmation(page, timeoutMs) {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     throwIfAborted()
-    const ok = await page
-      .evaluate(() => {
-        const url = location.href
-        if (/thank|confirm|order-complete|checkout\/success|order\/success|receipt/i.test(url)) return true
-        const text = document.body?.innerText || ''
-        return /thank you for (your )?order|order (has been )?placed|your order number|order confirmation|thanks for (your )?purchase/i.test(
-          text
-        )
-      })
-      .catch(() => false)
+    const ok = await evaluateAnyFrame(page, () => {
+      const url = location.href
+      if (/thank|confirm|order-complete|checkout\/success|order\/success|receipt/i.test(url)) return true
+      const text = document.body?.innerText || ''
+      return /thank you for (your )?order|order (has been )?placed|your order number|order confirmation|thanks for (your )?purchase/i.test(
+        text
+      )
+    })
     if (ok) return true
     await wait(400)
   }
@@ -1322,7 +1825,9 @@ async function autoRushFox(fox, qty) {
     emitUpdate()
     throw new Error(fox.error)
   }
+  await dumpPage(fox, page, 'before-auto-rush')
   await runRushCheckout(fox, page)
+  await dumpPage(fox, page, 'after-auto-rush')
   await inspectFox(fox)
   throwIfAborted()
   if (!isOnQueue(page.url()) && fox.status !== 'in_queue' && fox.status !== 'waiting_for_queue') {
@@ -1337,12 +1842,17 @@ function scriptHasPlaceOrder() {
     const r = el.getBoundingClientRect()
     if (r.width < 8 || r.height < 8) return false
     const text = (el.innerText || el.value || el.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim()
-    if (/add to cart|preorder|view cart|continue as guest/i.test(text)) return false
+    if (/add to cart|preorder|view cart|continue as guest|review order/i.test(text)) return false
     return /place order|pay now|submit order|complete (your )?order|confirm (purchase|order)|buy now/i.test(text)
   })
 }
 
 async function completeCheckoutFox(fox) {
+  await fillCheckoutFox(fox)
+  await placeOrderFox(fox)
+}
+
+async function fillCheckoutFox(fox) {
   throwIfAborted()
   const page = pageOf(fox)
   if (!page) throw new Error(`Scout ${fox.id} has no page`)
@@ -1350,43 +1860,119 @@ async function completeCheckoutFox(fox) {
   fox.statusLabel = 'Opening checkout…'
   fox.error = undefined
   emitUpdate()
+  trace(fox, 'fill', 'opening checkout')
+  await dumpPage(fox, page, 'checkout-start')
   const leaveQueue = Date.now() + 45000
   while (Date.now() < leaveQueue && isOnQueue(page.url())) {
     throwIfAborted()
     await wait(300)
   }
+
+  const onShipping = await evaluateAnyFrame(page, scriptOnShipping)
+  const hasSecure = await evaluateAnyFrame(page, scriptOnCart)
+  if (hasSecure && !onShipping) {
+    fox.statusLabel = 'Secure checkout…'
+    emitUpdate()
+    await dumpPage(fox, page, 'before-secure-checkout')
+    const clicked =
+      (await clickByRole(page, /secure checkout/i, 4000)) || (await clickByScript(page, scriptClickSecureCheckout, 8000))
+    trace(fox, 'secure-checkout', clicked ? 'clicked' : 'miss')
+    await dumpPage(fox, page, clicked ? 'after-secure-checkout' : 'miss-secure-checkout')
+    const emailUntil = Date.now() + 10000
+    while (Date.now() < emailUntil) {
+      throwIfAborted()
+      if (await evaluateAnyFrame(page, scriptOnShipping)) break
+      await wait(200)
+    }
+  }
+
+  fox.statusLabel = 'Filling shipping…'
+  emitUpdate()
+  const data = parseAddress(shippingProfile)
+  trace(
+    fox,
+    'shipping',
+    `line1="${data.street}" line2="${data.street2 || ''}" ${data.city} ${data.state} ${data.zip}`
+  )
+  const fillUntil = Date.now() + 25000
+  while (Date.now() < fillUntil) {
+    throwIfAborted()
+    await evaluateAllFrames(page, fillProfileInPage, data)
+    await fillShippingPlaywright(page, data)
+    if (await evaluateAnyFrame(page, scriptHasPlaceOrder)) break
+    await wait(300)
+  }
+  await dumpPage(fox, page, 'after-shipping-fill')
+
   fox.statusLabel = 'Filling payment…'
   emitUpdate()
+  await dumpPage(fox, page, 'before-payment')
   const readyUntil = Date.now() + 25000
   while (Date.now() < readyUntil) {
     throwIfAborted()
-    await page.evaluate(fillProfileInPage, parseAddress(shippingProfile)).catch(() => 0)
+    await evaluateAllFrames(page, fillProfileInPage, data)
+    await fillShippingPlaywright(page, data)
     await fillPaymentOnPage(page)
-    const canPlace = await page.evaluate(scriptHasPlaceOrder).catch(() => false)
+    const canPlace = await evaluateAnyFrame(page, scriptHasPlaceOrder)
     if (canPlace) break
-    await wait(400)
+    const continued =
+      (await clickByScript(page, scriptClickContinue, 2500)) ||
+      (await clickByRole(page, /continue to (shipping|payment|billing|review)|review order/i, 1500))
+    if (continued) {
+      trace(fox, 'continue', 'clicked continue/review')
+      await wait(800)
+    } else await wait(400)
   }
-  const qtyOk = await page.evaluate(readCartQtyOk, autoQty).catch(() => false)
-  if (!qtyOk) throw new Error(`Cart quantity is not ${autoQty}`)
+  await dumpPage(fox, page, 'after-payment-fill')
+  fox.statusLabel = 'Ready to place…'
+  emitUpdate()
+  trace(fox, 'fill', 'ready to place')
+}
+
+async function placeOrderFox(fox) {
+  throwIfAborted()
+  const page = pageOf(fox)
+  if (!page) throw new Error(`Scout ${fox.id} has no page`)
+  if (fox.status === 'purchased') return
+  const already = await waitForConfirmation(page, 1500)
+  if (already) {
+    trace(fox, 'confirmed', 'already on confirmation page')
+    fox.status = 'purchased'
+    fox.statusLabel = 'Purchased'
+    emitUpdate()
+    return
+  }
+  const qtyFine = await page.evaluate(readCartQtyOk, autoQty).catch(() => true)
+  if (!qtyFine) throw new Error(`Cart quantity is not ${autoQty}`)
+  fox.status = 'purchasing'
   fox.statusLabel = 'Placing order…'
   emitUpdate()
   throwIfAborted()
-  if (!(await clickByScript(page, scriptClickPlaceOrder, 20000))) {
-    throw new Error('Could not find Place order')
+  if (!fox.placeClicked) {
+    await dumpPage(fox, page, 'before-place-order')
+    const placed =
+      (await clickByRole(page, /place order|pay now/i, 8000)) ||
+      (await clickByScript(page, scriptClickPlaceOrder, 20000))
+    await dumpPage(fox, page, placed ? 'after-place-order' : 'miss-place-order')
+    trace(fox, 'place-order', placed ? 'clicked' : 'miss')
+    if (!placed) throw new Error('Could not find Place order')
+    fox.placeClicked = true
   }
   fox.statusLabel = 'Waiting for confirmation…'
   emitUpdate()
   const confirmed = await waitForConfirmation(page, 90000)
+  await dumpPage(fox, page, confirmed ? 'confirmed' : 'miss-confirmation')
+  trace(fox, confirmed ? 'confirmed' : 'place-order', confirmed ? 'order confirmation seen' : 'no confirmation')
   if (!confirmed) throw new Error('No order confirmation')
   fox.status = 'purchased'
   fox.statusLabel = 'Purchased'
   emitUpdate()
 }
 
-function abortFox(fox) {
+function abortFox(fox, reason) {
   if (fox.status === 'purchased') return
   fox.status = 'aborted'
-  fox.statusLabel = 'Aborted'
+  fox.statusLabel = reason ? `Aborted · ${reason}` : 'Aborted'
   fox.navigating = false
 }
 
@@ -1411,23 +1997,17 @@ async function handle(msg) {
       autoAborted = false
       await Promise.allSettled([...instances.values()].map((fox) => rushCheckoutFox(fox)))
     } else if (cmd === 'setProfile') {
-      shippingProfile = {
-        name: String(msg.profile?.name || ''),
-        address: String(msg.profile?.address || ''),
-        phone: String(msg.profile?.phone || ''),
-        email: String(msg.profile?.email || '')
-      }
+      shippingProfile = readShipping(msg.profile)
       await Promise.allSettled([...instances.values()].map((fox) => applyShippingToFox(fox)))
     } else if (cmd === 'setAutoRun') {
       autoAborted = false
       autoQty = Math.max(1, Number(msg.qtyPerOrder) || 1)
+      debugDumps = Boolean(msg.debugDumps)
+      dumpDir = String(msg.dumpDir || '')
+      dumpSeq = 0
+      autoProductUrl = String(msg.productUrl || '')
       if (msg.profile) {
-        shippingProfile = {
-          name: String(msg.profile?.name || ''),
-          address: String(msg.profile?.address || ''),
-          phone: String(msg.profile?.phone || ''),
-          email: String(msg.profile?.email || '')
-        }
+        shippingProfile = readShipping(msg.profile)
       }
       if (msg.payment) {
         paymentProfile = {
@@ -1451,6 +2031,7 @@ async function handle(msg) {
     } else if (cmd === 'autoRush') {
       const fox = instances.get(msg.foxId)
       if (!fox) throw new Error(`Scout ${msg.foxId} has no page`)
+      trace(fox, 'rush', `qty ${msg.qtyPerOrder || autoQty}`)
       await autoRushFox(fox, msg.qtyPerOrder)
     } else if (cmd === 'completeCheckout') {
       const fox = instances.get(msg.foxId)
@@ -1458,9 +2039,43 @@ async function handle(msg) {
       try {
         await completeCheckoutFox(fox)
       } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        trace(fox, 'error', message)
         if (fox.status !== 'purchased' && fox.status !== 'aborted') {
           fox.status = 'error'
-          fox.error = error instanceof Error ? error.message : String(error)
+          fox.error = message
+          fox.statusLabel = 'Error'
+          emitUpdate()
+        }
+        throw error
+      }
+    } else if (cmd === 'fillCheckout') {
+      const fox = instances.get(msg.foxId)
+      if (!fox) throw new Error(`Scout ${msg.foxId} has no page`)
+      try {
+        await fillCheckoutFox(fox)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        trace(fox, 'error', message)
+        if (fox.status !== 'purchased' && fox.status !== 'aborted') {
+          fox.status = 'error'
+          fox.error = message
+          fox.statusLabel = 'Error'
+          emitUpdate()
+        }
+        throw error
+      }
+    } else if (cmd === 'placeOrder') {
+      const fox = instances.get(msg.foxId)
+      if (!fox) throw new Error(`Scout ${msg.foxId} has no page`)
+      try {
+        await placeOrderFox(fox)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        trace(fox, 'error', message)
+        if (fox.status !== 'purchased' && fox.status !== 'aborted') {
+          fox.status = 'error'
+          fox.error = message
           fox.statusLabel = 'Error'
           emitUpdate()
         }
@@ -1468,17 +2083,26 @@ async function handle(msg) {
       }
     } else if (cmd === 'abortAuto') {
       autoAborted = true
-      for (const fox of instances.values()) abortFox(fox)
+      const reason = String(msg.reason || 'stopped')
+      for (const fox of instances.values()) {
+        abortFox(fox, reason)
+        trace(fox, 'abort', reason)
+      }
       emitUpdate()
     } else if (cmd === 'reload') {
       const fox = instances.get(msg.foxId)
       if (fox) {
+        const keepHunt = fox.status === 'hunting'
         fox.navigating = true
         fox.status = 'loading'
         fox.statusLabel = 'Loading'
         try {
           await fox.page.reload({ waitUntil: 'domcontentloaded' })
           fox.error = undefined
+          if (keepHunt) {
+            fox.status = 'hunting'
+            fox.statusLabel = 'Hunting…'
+          }
         } catch (error) {
           fox.status = 'error'
           fox.error = error instanceof Error ? error.message : 'Reload failed'

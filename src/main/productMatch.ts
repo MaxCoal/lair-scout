@@ -75,6 +75,25 @@ function foilBonus(query: string, title: string, hint: FoilHint): number {
   return 0
 }
 
+function slugTitle(url: string): string {
+  try {
+    const path = new URL(url).pathname
+    const slug = path.split('/').filter(Boolean).pop() || ''
+    if (/^\d+$/.test(slug)) return ''
+    return decodeURIComponent(slug).replace(/-/g, ' ')
+  } catch {
+    return ''
+  }
+}
+
+function displayTitle(title: string, url: string): string {
+  const cleaned = String(title || '').replace(/\s+/g, ' ').trim()
+  if (!cleaned || /^(foil|non[-\s]?foil|add to cart|preorder|shop|new)$/i.test(cleaned)) {
+    return slugTitle(url) || cleaned
+  }
+  return cleaned
+}
+
 export function scoreProduct(query: string, title: string, foilHint: FoilHint): number {
   const q = stripNoise(query)
   const t = stripNoise(title)
@@ -85,7 +104,8 @@ export function scoreProduct(query: string, title: string, foilHint: FoilHint): 
   const maxLen = Math.max(q.length, t.length)
   const ratio = maxLen ? 1 - levenshtein(q, t) / maxLen : 0
   const includes = t.includes(q) || q.includes(t) ? 1 : 0
-  const base = overlap * 0.5 + ratio * 0.3 + includes * 0.2
+  const tokenHit = qTokens.length && overlap === 1 ? 0.15 : 0
+  const base = overlap * 0.5 + ratio * 0.3 + includes * 0.2 + tokenHit
   return Math.max(0, Math.min(1, base + foilBonus(query, title, foilHint)))
 }
 
@@ -100,11 +120,11 @@ export function scoreHits(
     const url = normalizeProductUrl(hit.url)
     if (!/\/product\/\d+/i.test(url)) continue
     const id = productIdFromUrl(url)
-    const title = String(hit.title || '').replace(/\s+/g, ' ').trim() || id
+    const title = displayTitle(hit.title, url) || id
     const scored: ProductCandidate = {
       url,
       title,
-      score: scoreProduct(query, title, foilHint),
+      score: Math.max(scoreProduct(query, title, foilHint), scoreProduct(query, slugTitle(url), foilHint)),
       isNew: !baselineIds.has(id)
     }
     const prev = byId.get(id)
@@ -117,23 +137,29 @@ export function scoreHits(
 
 export function pickLocalMatch(candidates: ProductCandidate[]): ProductCandidate | null {
   if (!candidates.length) return null
-  const fresh = candidates.filter((item) => item.isNew)
-  const pool = fresh.length ? fresh : candidates
-  const best = pool[0]
-  const second = pool[1]
-  if (fresh.length === 1 && best.score >= WEAK_NEW_SCORE) return best
-  if (best.score < MIN_SCORE) return null
-  if (second && best.score - second.score < CLOSE_DELTA && second.score >= MIN_SCORE - 0.05) return null
-  return best
+  const ranked = [...candidates].sort((a, b) => b.score - a.score || Number(b.isNew) - Number(a.isNew))
+  const best = ranked[0]
+  const rival = ranked[1]
+  if (isUniqueHigh(best, rival)) return best
+
+  const fresh = ranked.filter((item) => item.isNew)
+  if (fresh.length === 1 && fresh[0].score >= WEAK_NEW_SCORE) return fresh[0]
+  if (fresh.length > 1 && isUniqueHigh(fresh[0], fresh[1])) return fresh[0]
+  return null
+}
+
+function isUniqueHigh(best: ProductCandidate | undefined, rival: ProductCandidate | undefined): boolean {
+  if (!best || best.score < MIN_SCORE) return false
+  if (!rival) return true
+  return best.score - rival.score >= CLOSE_DELTA || rival.score < MIN_SCORE - 0.05
 }
 
 export function needsAiPick(candidates: ProductCandidate[]): boolean {
-  const fresh = candidates.filter((item) => item.isNew)
-  const pool = fresh.length ? fresh : candidates
-  if (pool.length < 2) return false
-  const best = pool[0]
-  const second = pool[1]
-  if (!best || !second) return false
+  if (pickLocalMatch(candidates)) return false
+  const ranked = [...candidates].sort((a, b) => b.score - a.score)
+  if (ranked.length < 2) return false
+  const best = ranked[0]
+  const second = ranked[1]
   if (best.score < WEAK_NEW_SCORE) return false
   return best.score - second.score < CLOSE_DELTA
 }
@@ -144,10 +170,7 @@ export async function pickWithLlm(
   candidates: ProductCandidate[],
   apiKey: string
 ): Promise<ProductCandidate | null> {
-  const pool = (candidates.filter((item) => item.isNew).length
-    ? candidates.filter((item) => item.isNew)
-    : candidates
-  ).slice(0, 8)
+  const pool = [...candidates].sort((a, b) => b.score - a.score || Number(b.isNew) - Number(a.isNew)).slice(0, 8)
   if (!apiKey || pool.length === 0) return pickLocalMatch(candidates)
   try {
     const response = await fetch('https://api.openai.com/v1/chat/completions', {

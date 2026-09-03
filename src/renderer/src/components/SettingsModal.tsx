@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import type { AppSettings, ThemeId } from '@shared/types'
+import { normalizeShipping } from '@shared/shipping'
 import { applyTheme } from '../theme'
 
 type Props = {
@@ -17,8 +18,14 @@ function maskNumber(last4: string): string {
 }
 
 export default function SettingsModal({ open, onClose }: Props) {
-  const [name, setName] = useState('')
-  const [address, setAddress] = useState('')
+  const [firstName, setFirstName] = useState('')
+  const [lastName, setLastName] = useState('')
+  const [address1, setAddress1] = useState('')
+  const [address2, setAddress2] = useState('')
+  const [city, setCity] = useState('')
+  const [state, setState] = useState('')
+  const [zip, setZip] = useState('')
+  const [country, setCountry] = useState('US')
   const [phone, setPhone] = useState('')
   const [email, setEmail] = useState('')
   const [theme, setTheme] = useState<ThemeId>('dungeon')
@@ -33,12 +40,19 @@ export default function SettingsModal({ open, onClose }: Props) {
   const [error, setError] = useState('')
 
   const applySettings = (settings: AppSettings): void => {
-    setName(settings.name)
-    setAddress(settings.address)
-    setPhone(settings.phone ?? '')
-    setEmail(settings.email ?? '')
+    const ship = normalizeShipping(settings)
+    setFirstName(ship.firstName)
+    setLastName(ship.lastName)
+    setAddress1(ship.address1)
+    setAddress2(ship.address2)
+    setCity(ship.city)
+    setState(ship.state)
+    setZip(ship.zip)
+    setCountry(ship.country || 'US')
+    setPhone(ship.phone)
+    setEmail(ship.email)
     setTheme(settings.theme)
-    setCardHolderName(settings.cardHolderName || settings.name)
+    setCardHolderName(settings.cardHolderName || ship.name)
     setCardNumber(settings.hasCard ? maskNumber(settings.cardLast4) : '')
     setCardExpiry(settings.cardExpiry || '')
     setHasCard(settings.hasCard)
@@ -56,11 +70,21 @@ export default function SettingsModal({ open, onClose }: Props) {
 
   if (!open) return null
 
-  const persist = (next: {
-    name: string
-    address: string
-    phone: string
-    email: string
+  const shippingFields = () =>
+    normalizeShipping({
+      firstName,
+      lastName,
+      address1,
+      address2,
+      city,
+      state,
+      zip,
+      country,
+      phone,
+      email
+    })
+
+  const persist = (next: ReturnType<typeof shippingFields> & {
     theme: ThemeId
     cardHolderName: string
     cardNumber: string
@@ -83,13 +107,13 @@ export default function SettingsModal({ open, onClose }: Props) {
 
   const onSave = (event: FormEvent): void => {
     event.preventDefault()
-    void persist({ name, address, phone, email, theme, cardHolderName, cardNumber, cardExpiry, llmApiKey })
+    void persist({ ...shippingFields(), theme, cardHolderName, cardNumber, cardExpiry, llmApiKey })
   }
 
   const onPickTheme = (next: ThemeId): void => {
     setTheme(next)
     applyTheme(next)
-    void persist({ name, address, phone, email, theme: next, cardHolderName, cardNumber, cardExpiry, llmApiKey })
+    void persist({ ...shippingFields(), theme: next, cardHolderName, cardNumber, cardExpiry, llmApiKey })
   }
 
   return (
@@ -123,12 +147,9 @@ export default function SettingsModal({ open, onClose }: Props) {
           </div>
         </label>
         <p className="hint">
-          Saved on this machine only. Name, email, and address are filled into checkout forms on every scout.
+          Saved on this machine only. Fields match Secret Lair checkout so Full Auto fills the same boxes you see in
+          the scout.
         </p>
-        <label className="field">
-          <span>Name</span>
-          <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Jane Doe" />
-        </label>
         <label className="field">
           <span>Email</span>
           <input
@@ -139,33 +160,133 @@ export default function SettingsModal({ open, onClose }: Props) {
             autoComplete="email"
           />
         </label>
+        <div className="field-row names">
+          <label className="field">
+            <span>First name</span>
+            <input
+              value={firstName}
+              onChange={(event) => setFirstName(event.target.value)}
+              placeholder="Jane"
+              autoComplete="given-name"
+            />
+          </label>
+          <label className="field">
+            <span>Last name</span>
+            <input
+              value={lastName}
+              onChange={(event) => setLastName(event.target.value)}
+              placeholder="Doe"
+              autoComplete="family-name"
+            />
+          </label>
+        </div>
         <label className="field">
-          <span>Address</span>
-          <textarea
-            value={address}
-            onChange={(event) => setAddress(event.target.value)}
-            rows={4}
-            placeholder={'123 Main St\nSpringfield, IL 62701'}
+          <span>Address line 1</span>
+          <input
+            value={address1}
+            onChange={(event) => setAddress1(event.target.value.slice(0, 25))}
+            placeholder="123 Main St"
+            autoComplete="address-line1"
+            maxLength={25}
           />
         </label>
+        <label className="field">
+          <span>
+            Address line 2 <em className="opt">optional</em>
+          </span>
+          <input
+            value={address2}
+            onChange={(event) => setAddress2(event.target.value.slice(0, 25))}
+            placeholder="Apt, suite, unit"
+            autoComplete="address-line2"
+            maxLength={25}
+          />
+        </label>
+        <div className="field-row country-zip">
+          <label className="field">
+            <span>Country</span>
+            <select value={country} onChange={(event) => setCountry(event.target.value)} autoComplete="country">
+              <option value="US">United States</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>Zip code</span>
+            <input
+              value={zip}
+              onChange={(event) => setZip(event.target.value.toUpperCase())}
+              placeholder="62701"
+              autoComplete="postal-code"
+            />
+          </label>
+        </div>
+        <div className="field-row city-state">
+          <label className="field">
+            <span>City</span>
+            <input
+              value={city}
+              onChange={(event) => setCity(event.target.value)}
+              placeholder="Springfield"
+              autoComplete="address-level2"
+            />
+          </label>
+          <label className="field">
+            <span>State</span>
+            <input
+              value={state}
+              onChange={(event) => setState(event.target.value.toUpperCase().slice(0, 2))}
+              placeholder="IL"
+              autoComplete="address-level1"
+              maxLength={2}
+            />
+          </label>
+        </div>
         <label className="field">
           <span>Phone</span>
           <input
             value={phone}
             onChange={(event) => setPhone(event.target.value)}
-            placeholder="555-867-5309"
+            placeholder="5558675309"
             inputMode="tel"
+            autoComplete="tel"
           />
         </label>
         <p className="hint">
           Card number and expiry are encrypted on this PC. CVV is never saved — enter it when you Arm Full Auto.
+          Phone is sent as digits only.
         </p>
+        <button
+          className="btn ghost"
+          type="button"
+          onClick={() => {
+            const ship = shippingFields()
+            void persist({
+              ...ship,
+              firstName: ship.firstName || 'Test',
+              lastName: ship.lastName || 'Buyer',
+              name: ship.name || 'Test Buyer',
+              email: ship.email || 'test@example.com',
+              address1: ship.address1 || '123 Test St',
+              city: ship.city || 'Springfield',
+              state: ship.state || 'IL',
+              zip: ship.zip || '62701',
+              country: ship.country || 'US',
+              phone: ship.phone || '5550100',
+              theme,
+              cardHolderName: cardHolderName || ship.name || 'Test Buyer',
+              cardNumber: '4242424242424242',
+              cardExpiry: '12/30',
+              llmApiKey
+            })
+          }}
+        >
+          Use test card
+        </button>
         <label className="field">
           <span>Name on card</span>
           <input
             value={cardHolderName}
             onChange={(event) => setCardHolderName(event.target.value)}
-            placeholder={name || 'Jane Doe'}
+            placeholder={firstName || lastName ? `${firstName} ${lastName}`.trim() : 'Jane Doe'}
             autoComplete="cc-name"
           />
         </label>
@@ -202,7 +323,7 @@ export default function SettingsModal({ open, onClose }: Props) {
         </label>
         <div className="top-actions" style={{ justifyContent: 'flex-end' }}>
           {error ? <span className="hint">{error}</span> : null}
-          {saved ? <span className="hint">Saved. Live boxes will autofill on the next checkout page.</span> : null}
+          {saved ? <span className="hint">Saved. Restart scouts if a run is already armed.</span> : null}
           <button className="btn" type="button" onClick={onClose}>
             Close
           </button>

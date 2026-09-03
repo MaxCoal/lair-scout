@@ -10,6 +10,7 @@ import type {
   MovePayload,
   QueueNotice,
   RamSnapshot,
+  ScoutLogEntry,
   ScrollPayload,
   SettingsUpdate
 } from '@shared/types'
@@ -45,6 +46,7 @@ const api: LairScoutAPI = {
   setFocused: (id) => ipcRenderer.invoke('instances:setFocused', id),
   getSettings: () => ipcRenderer.invoke('settings:get'),
   saveSettings: (settings: SettingsUpdate) => ipcRenderer.invoke('settings:save', settings),
+  getScoutLogs: () => ipcRenderer.invoke('scout:logs'),
   getFullAuto: () => ipcRenderer.invoke('fullAuto:get'),
   armFullAuto: (input: FullAutoArmInput) => ipcRenderer.invoke('fullAuto:arm', input),
   disarmFullAuto: () => ipcRenderer.invoke('fullAuto:disarm'),
@@ -98,6 +100,13 @@ const api: LairScoutAPI = {
     ipcRenderer.on('fullAuto:update', listener)
     return () => {
       ipcRenderer.removeListener('fullAuto:update', listener)
+    }
+  },
+  onScoutLog: (cb) => {
+    const listener = (_event: unknown, entry: ScoutLogEntry): void => cb(entry)
+    ipcRenderer.on('scout:log', listener)
+    return () => {
+      ipcRenderer.removeListener('scout:log', listener)
     }
   },
   quit: () => ipcRenderer.invoke('app:quit')

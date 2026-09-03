@@ -82,9 +82,25 @@ export type RamSnapshot = {
 
 export type ShippingProfile = {
   name: string
-  address: string
-  phone: string
+  firstName: string
+  lastName: string
   email: string
+  address: string
+  address1: string
+  address2: string
+  city: string
+  state: string
+  zip: string
+  country: string
+  phone: string
+}
+
+export type ScoutLogEntry = {
+  at: number
+  foxId: string
+  step: string
+  detail: string
+  url: string
 }
 
 export type ThemeId = 'dungeon' | 'daylight'
@@ -122,6 +138,7 @@ export type FullAutoArmInput = {
   maxOrders: number
   qtyPerOrder: number
   cvv: string
+  debugDumps?: boolean
 }
 
 export type FullAutoStatus = {
@@ -139,6 +156,8 @@ export type FullAutoStatus = {
   candidates: ProductCandidate[]
   error?: string
   hasCvv: boolean
+  debugDumps: boolean
+  dumpDir: string
 }
 
 export type AppSettings = ShippingProfile & {
@@ -181,6 +200,7 @@ export type LairScoutAPI = {
   setFocused: (id: string | null) => Promise<void>
   getSettings: () => Promise<AppSettings>
   saveSettings: (settings: SettingsUpdate) => Promise<AppSettings>
+  getScoutLogs: () => Promise<{ path: string; lines: ScoutLogEntry[] }>
   getFullAuto: () => Promise<FullAutoStatus>
   armFullAuto: (input: FullAutoArmInput) => Promise<FullAutoStatus>
   disarmFullAuto: () => Promise<FullAutoStatus>
@@ -191,5 +211,6 @@ export type LairScoutAPI = {
   onRam: (cb: (ram: RamSnapshot) => void) => () => void
   onSettings: (cb: (settings: AppSettings) => void) => () => void
   onFullAuto: (cb: (status: FullAutoStatus) => void) => () => void
+  onScoutLog: (cb: (entry: ScoutLogEntry) => void) => () => void
   quit: () => Promise<void>
 }

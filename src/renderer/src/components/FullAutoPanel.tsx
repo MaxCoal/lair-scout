@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import type { FoilHint, FullAutoStatus } from '@shared/types'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import type { FoilHint, FullAutoStatus, ScoutLogEntry } from '@shared/types'
+import { normalizeShipping } from '@shared/shipping'
 
 type Props = {
   fleetSize: number
@@ -47,11 +48,31 @@ export default function FullAutoPanel({ fleetSize, status }: Props) {
   const [maxOrders, setMaxOrders] = useState('1')
   const [qtyPerOrder, setQtyPerOrder] = useState('1')
   const [cvv, setCvv] = useState('')
+  const [debugDumps, setDebugDumps] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [now, setNow] = useState(() => Date.now())
+  const [logs, setLogs] = useState<ScoutLogEntry[]>([])
+  const [logPath, setLogPath] = useState('')
+  const [logOpen, setLogOpen] = useState(false)
+  const logEnd = useRef<HTMLDivElement | null>(null)
 
   const armed = status.phase !== 'idle' && status.phase !== 'aborted' && status.phase !== 'done' && status.phase !== 'error'
+
+  useEffect(() => {
+    void window.lairscout.getScoutLogs().then((bundle) => {
+      setLogs(bundle.lines)
+      setLogPath(bundle.path)
+    })
+    return window.lairscout.onScoutLog((entry) => {
+      setLogs((prev) => [...prev.slice(-140), entry])
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!logOpen) return
+    logEnd.current?.scrollIntoView({ block: 'end' })
+  }, [logs, logOpen])
 
   useEffect(() => {
     if (!armed) return undefined
@@ -95,13 +116,46 @@ export default function FullAutoPanel({ fleetSize, status }: Props) {
         fleetSize,
         maxOrders: Number.parseInt(maxOrders, 10) || 1,
         qtyPerOrder: Number.parseInt(qtyPerOrder, 10) || 1,
-        cvv
+        cvv,
+        debugDumps
       })
       .then(() => setCvv(''))
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : String(err))
       })
       .finally(() => setBusy(false))
+  }
+
+  const onTestCard = async (): Promise<void> => {
+    setBusy(true)
+    setError('')
+    try {
+      const settings = await window.lairscout.getSettings()
+      const ship = normalizeShipping(settings)
+      await window.lairscout.saveSettings({
+        ...ship,
+        firstName: ship.firstName || 'Test',
+        lastName: ship.lastName || 'Buyer',
+        name: ship.name || 'Test Buyer',
+        email: ship.email || 'test@example.com',
+        address1: ship.address1 || '123 Test St',
+        city: ship.city || 'Springfield',
+        state: ship.state || 'IL',
+        zip: ship.zip || '62701',
+        country: ship.country || 'US',
+        phone: ship.phone || '5550100',
+        theme: settings.theme,
+        cardHolderName: settings.cardHolderName || ship.name || 'Test Buyer',
+        cardNumber: '4242424242424242',
+        cardExpiry: '12/30'
+      })
+      setCvv('123')
+      setDebugDumps(true)
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
   }
 
   const onDisarm = (): void => {
@@ -188,12 +242,26 @@ export default function FullAutoPanel({ fleetSize, status }: Props) {
               Disarm
             </button>
           ) : (
-            <button className="btn rush" type="submit" disabled={busy || fleetSize === 0}>
-              {busy ? 'Arming…' : 'Arm'}
-            </button>
+            <>
+              <button className="btn ghost" type="button" onClick={() => void onTestCard()} disabled={busy}>
+                Test card
+              </button>
+              <button className="btn rush" type="submit" disabled={busy || fleetSize === 0}>
+                {busy ? 'Arming…' : 'Arm'}
+              </button>
+            </>
           )}
         </div>
       </div>
+      <label className="auto-dump">
+        <input
+          type="checkbox"
+          checked={debugDumps || status.debugDumps}
+          onChange={(event) => setDebugDumps(event.target.checked)}
+          disabled={armed}
+        />
+        Save page HTML at each click (testing)
+      </label>
       <div className="auto-status">
         <span className={`chip ${status.phase === 'done' ? 'purchased' : status.phase}`}>
           {PHASE_COPY[status.phase]}
@@ -217,9 +285,39 @@ export default function FullAutoPanel({ fleetSize, status }: Props) {
         </div>
       ) : null}
       <p className="auto-note">
-        Keep this PC awake. Scouts warm up before go-live, then search the store for the name. Remaining scouts abort as
-        soon as max orders confirm.
+        Keep this PC awake. Scouts warm up before go-live, then search the store for the name. Remaining scouts abort
+        only after max orders confirm.
+        {status.dumpDir ? ` Page dumps: ${status.dumpDir}` : ''}
       </p>
+      <div className="auto-log">
+        <button
+          className="auto-log-head"
+          type="button"
+          aria-expanded={logOpen}
+          onClick={() => setLogOpen((open) => !open)}
+        >
+          <span>
+            Scout actions
+            {logs.length ? ` · ${logs.length}` : ''}
+          </span>
+          <span className="auto-log-toggle">{logOpen ? 'Hide' : 'Show'}</span>
+        </button>
+        {logOpen ? (
+          <pre className="auto-log-body">
+            {logs.length
+              ? logs
+                  .slice(-80)
+                  .map((entry) => {
+                    const time = new Date(entry.at).toLocaleTimeString()
+                    const who = entry.foxId ? `S${entry.foxId}` : 'auto'
+                    return `${time}  ${who}  ${entry.step}${entry.detail ? `  ${entry.detail}` : ''}`
+                  })
+                  .join('\n')
+              : `Actions show up here when you Arm. Same lines are written to ${logPath || 'scout-logs/actions.log'}.`}
+            <div ref={logEnd} />
+          </pre>
+        ) : null}
+      </div>
     </form>
   )
 }

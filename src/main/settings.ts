@@ -3,14 +3,12 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { app } from 'electron'
 import type { AppSettings, SettingsUpdate, ThemeId } from '@shared/types'
+import { emptyShipping, normalizeShipping } from '@shared/shipping'
 import { emptyCard, loadCardVault, looksMasked, saveCardVault, type CardSecrets } from './cardVault'
 
 export function emptySettings(): AppSettings {
   return {
-    name: '',
-    address: '',
-    phone: '',
-    email: '',
+    ...emptyShipping(),
     theme: 'dungeon',
     cardHolderName: '',
     cardLast4: '',
@@ -30,14 +28,11 @@ export function settingsPath(): string {
 }
 
 function publicSettings(
-  shipping: { name: string; address: string; phone: string; email: string; theme: ThemeId },
+  shipping: ReturnType<typeof normalizeShipping> & { theme: ThemeId },
   card: CardSecrets
 ): AppSettings {
   return {
-    name: shipping.name,
-    address: shipping.address,
-    phone: shipping.phone,
-    email: shipping.email,
+    ...shipping,
     theme: shipping.theme,
     cardHolderName: card.holderName,
     cardLast4: card.last4,
@@ -50,30 +45,24 @@ function publicSettings(
 export async function loadSettings(): Promise<AppSettings> {
   const path = settingsPath()
   const card = await loadCardVault()
-  if (!existsSync(path)) return publicSettings(emptySettings(), card)
+  if (!existsSync(path)) return publicSettings({ ...emptyShipping(), theme: 'dungeon' }, card)
   try {
-    const raw = JSON.parse(await readFile(path, 'utf8')) as Partial<AppSettings>
+    const raw = JSON.parse(await readFile(path, 'utf8')) as Partial<SettingsUpdate> & { theme?: ThemeId }
     return publicSettings(
       {
-        name: String(raw.name || ''),
-        address: String(raw.address || ''),
-        phone: String(raw.phone || ''),
-        email: String(raw.email || ''),
+        ...normalizeShipping(raw),
         theme: parseTheme(raw.theme)
       },
       card
     )
   } catch {
-    return publicSettings(emptySettings(), card)
+    return publicSettings({ ...emptySettings(), theme: 'dungeon' }, card)
   }
 }
 
 export async function saveSettings(update: SettingsUpdate): Promise<AppSettings> {
   const shipping = {
-    name: String(update.name || '').trim(),
-    address: String(update.address || '').trim(),
-    phone: String(update.phone || '').trim(),
-    email: String(update.email || '').trim(),
+    ...normalizeShipping(update),
     theme: parseTheme(update.theme)
   }
   await writeFile(settingsPath(), `${JSON.stringify(shipping, null, 2)}\n`, 'utf8')

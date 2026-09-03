@@ -27,7 +27,9 @@ const IDLE_AUTO: FullAutoStatus = {
   matchedUrl: '',
   ordersConfirmed: 0,
   candidates: [],
-  hasCvv: false
+  hasCvv: false,
+  debugDumps: false,
+  dumpDir: ''
 }
 
 function playTone(startHz: number, endHz: number): void {

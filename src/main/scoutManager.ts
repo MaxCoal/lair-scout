@@ -4,11 +4,13 @@ import { existsSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { join } from 'node:path'
 import type { AppSettings, FullAutoArmInput, FullAutoStatus, InstanceSnapshot, RamSnapshot, SettingsUpdate, ShippingProfile } from '@shared/types'
+import { emptyShipping, normalizeShipping } from '@shared/shipping'
 import { findScoutWindow, hideScoutWindow, moveScoutWindow, placeScoutWindow, setClipChildren, showWindow, stopWin32Host } from './win32'
 import { readRam } from './memory'
 import { emptySettings, loadSettings, saveSettings } from './settings'
 import { emptyCard, loadCardVault, type CardSecrets } from './cardVault'
 import { FullAutoRunner } from './fullAuto'
+import { appendScoutLog, recentScoutLogs, scoutLogPath, setScoutDumpDir } from './scoutLog'
 
 const DEFAULT_COUNT = 2
 const MAX_FLEET = 20
@@ -47,7 +49,7 @@ export class ScoutManager {
   private windows = new Map<string, WindowState>()
   private muted = false
   private shuttingDown = false
-  private shipping: ShippingProfile = { name: '', address: '', phone: '', email: '' }
+  private shipping: ShippingProfile = emptyShipping()
   private settings: AppSettings = emptySettings()
   private card: CardSecrets = emptyCard()
   private fullAuto: FullAutoRunner
@@ -72,7 +74,11 @@ export class ScoutManager {
       callOn: (id, cmd, payload, timeoutMs) => this.callOn(id, cmd, payload, timeoutMs),
       fireOn: (id, cmd, payload) => this.fireOn(id, cmd, payload),
       shipping: () => this.shipping,
-      card: () => this.card
+      card: () => this.card,
+      log: (step, detail, foxId) => {
+        appendScoutLog({ step, detail, foxId })
+      },
+      setDumpDir: (dir) => setScoutDumpDir(dir)
     })
     this.fullAuto.onStatus((status) => this.broadcastFullAuto(status))
   }
@@ -84,12 +90,7 @@ export class ScoutManager {
     this.armRamTimer()
     void loadSettings().then(async (settings) => {
       this.settings = settings
-      this.shipping = {
-        name: settings.name,
-        address: settings.address,
-        phone: settings.phone,
-        email: settings.email
-      }
+      this.shipping = normalizeShipping(settings)
       this.card = await loadCardVault()
       this.broadcastSettings()
       void this.pushProfile()
@@ -110,6 +111,10 @@ export class ScoutManager {
     return this.fullAuto.status
   }
 
+  getScoutLogs(): { path: string; lines: ReturnType<typeof recentScoutLogs> } {
+    return { path: scoutLogPath(), lines: recentScoutLogs() }
+  }
+
   async armFullAuto(input: FullAutoArmInput): Promise<FullAutoStatus> {
     return this.fullAuto.arm(input)
   }
@@ -120,12 +125,7 @@ export class ScoutManager {
 
   async saveProfile(settings: SettingsUpdate): Promise<AppSettings> {
     this.settings = await saveSettings(settings)
-    this.shipping = {
-      name: this.settings.name,
-      address: this.settings.address,
-      phone: this.settings.phone,
-      email: this.settings.email
-    }
+    this.shipping = normalizeShipping(this.settings)
     this.card = await loadCardVault()
     this.broadcastSettings()
     await this.pushProfile()
@@ -600,6 +600,18 @@ export class ScoutManager {
       this.pending.delete(message.requestId)
       if (message.ok) pending.resolve(message.result)
       else pending.reject(new Error(message.error || 'Worker error'))
+      return
+    }
+
+    if (message.type === 'event' && message.event === 'scoutLog') {
+      const payload = (message.payload || {}) as { foxId?: string; at?: number; step?: string; detail?: string; url?: string }
+      appendScoutLog({
+        foxId: String(payload.foxId || foxId),
+        at: Number(payload.at) || Date.now(),
+        step: String(payload.step || 'note'),
+        detail: String(payload.detail || ''),
+        url: String(payload.url || '')
+      })
       return
     }
 
