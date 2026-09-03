@@ -7,12 +7,12 @@ export function useAdmittedTimer(fox: InstanceSnapshot): string {
   const [, setTick] = useState(0)
 
   useEffect(() => {
-    if (!fox.admittedAt || fox.status !== 'admitted') return undefined
+    if (!fox.admittedAt || (fox.status !== 'admitted' && fox.status !== 'purchasing')) return undefined
     const id = window.setInterval(() => setTick((n) => n + 1), 1000)
     return () => window.clearInterval(id)
   }, [fox.admittedAt, fox.status])
 
-  if (!fox.admittedAt || fox.status !== 'admitted') return ''
+  if (!fox.admittedAt || (fox.status !== 'admitted' && fox.status !== 'purchasing')) return ''
 
   const elapsed = Date.now() - fox.admittedAt
   const remaining = CHECKOUT_WINDOW_MS - elapsed

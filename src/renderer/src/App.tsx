@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import type { InstanceSnapshot, QueueNotice, RamSnapshot } from '@shared/types'
+import type { AppMode, FullAutoStatus, InstanceSnapshot, QueueNotice, RamSnapshot } from '@shared/types'
 import FleetBar from './components/FleetBar'
+import FullAutoPanel from './components/FullAutoPanel'
 import Sidebar from './components/Sidebar'
 import InstanceGrid from './components/InstanceGrid'
 import FocusView from './components/FocusView'
@@ -12,6 +13,22 @@ import { applyTheme } from './theme'
 
 const DEFAULT_URL = 'https://secretlair.wizards.com/us'
 const IS_DRIVE_PAD = window.location.hash === '#drive'
+
+const IDLE_AUTO: FullAutoStatus = {
+  phase: 'idle',
+  productQuery: '',
+  foilHint: 'any',
+  goLiveAt: 0,
+  warmupMinutes: 5,
+  fleetSize: 2,
+  maxOrders: 1,
+  qtyPerOrder: 1,
+  matchedTitle: '',
+  matchedUrl: '',
+  ordersConfirmed: 0,
+  candidates: [],
+  hasCvv: false
+}
 
 function playTone(startHz: number, endHz: number): void {
   const ctx = new AudioContext()
@@ -38,12 +55,19 @@ export default function App() {
   const [ram, setRam] = useState<RamSnapshot | null>(null)
   const [rushing, setRushing] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [mode, setMode] = useState<AppMode>('manual')
+  const [fullAuto, setFullAuto] = useState<FullAutoStatus>(IDLE_AUTO)
   const [instanceSort, setInstanceSort] = useState<InstanceSort>('id')
   const [dismissedNotices, setDismissedNotices] = useState<string[]>([])
 
   useEffect(() => {
     void window.lairscout.getSettings().then((settings) => applyTheme(settings.theme))
     return window.lairscout.onSettings((settings) => applyTheme(settings.theme))
+  }, [])
+
+  useEffect(() => {
+    void window.lairscout.getFullAuto().then(setFullAuto)
+    return window.lairscout.onFullAuto(setFullAuto)
   }, [])
 
   useEffect(() => {
@@ -163,36 +187,41 @@ export default function App() {
 
   return (
     <div className="shell">
-      <FleetBar
-        url={url}
-        count={instances.length}
-        ram={ram}
-        muted={muted}
-        driveAll={driveAll}
-        onUrl={setUrl}
-        onSendAll={sendAll}
-        onRushCheckout={rushCheckout}
-        rushing={rushing}
-        onScaleTo={(next) => window.lairscout.scaleTo(next)}
-        onToggleMute={() => {
-          const next = !muted
-          setMuted(next)
-          void window.lairscout.setMuted(next)
-        }}
-        onToggleDriveAll={() => {
-          setDriveAll((value) => {
-            const next = !value
-            setLiveId(null)
-            if (!next) void window.lairscout.closeDriveWindow()
-            return next
-          })
-        }}
-        onOpenDriveWindow={() => window.lairscout.openDriveWindow()}
-        onOpenSettings={() => setSettingsOpen(true)}
-        instanceSort={instanceSort}
-        onCycleInstanceSort={() => setInstanceSort((value) => nextInstanceSort(value))}
-        onQuit={() => void window.lairscout.quit()}
-      />
+      <div className="chrome">
+        <FleetBar
+          url={url}
+          count={instances.length}
+          ram={ram}
+          muted={muted}
+          driveAll={driveAll}
+          mode={mode}
+          onMode={setMode}
+          onUrl={setUrl}
+          onSendAll={sendAll}
+          onRushCheckout={rushCheckout}
+          rushing={rushing}
+          onScaleTo={(next) => window.lairscout.scaleTo(next)}
+          onToggleMute={() => {
+            const next = !muted
+            setMuted(next)
+            void window.lairscout.setMuted(next)
+          }}
+          onToggleDriveAll={() => {
+            setDriveAll((value) => {
+              const next = !value
+              setLiveId(null)
+              if (!next) void window.lairscout.closeDriveWindow()
+              return next
+            })
+          }}
+          onOpenDriveWindow={() => window.lairscout.openDriveWindow()}
+          onOpenSettings={() => setSettingsOpen(true)}
+          instanceSort={instanceSort}
+          onCycleInstanceSort={() => setInstanceSort((value) => nextInstanceSort(value))}
+          onQuit={() => void window.lairscout.quit()}
+        />
+        {mode === 'auto' ? <FullAutoPanel fleetSize={instances.length} status={fullAuto} /> : null}
+      </div>
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <div className="workspace">
         <Sidebar

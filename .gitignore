@@ -8,4 +8,5 @@ dist
 .idea
 examples/
 settings.json
+card.vault.json
 

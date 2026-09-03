@@ -5,6 +5,10 @@ export type SessionStatus =
   | 'waiting_for_queue'
   | 'in_queue'
   | 'admitted'
+  | 'hunting'
+  | 'purchasing'
+  | 'purchased'
+  | 'aborted'
   | 'error'
 
 export type QueueNotice = {
@@ -80,12 +84,78 @@ export type ShippingProfile = {
   name: string
   address: string
   phone: string
+  email: string
 }
 
 export type ThemeId = 'dungeon' | 'daylight'
 
+export type FoilHint = 'any' | 'foil' | 'nonfoil'
+
+export type AppMode = 'manual' | 'auto'
+
+export type FullAutoPhase =
+  | 'idle'
+  | 'armed'
+  | 'warming'
+  | 'hunting'
+  | 'matched'
+  | 'rushing'
+  | 'in_queue'
+  | 'purchasing'
+  | 'done'
+  | 'aborted'
+  | 'error'
+
+export type ProductCandidate = {
+  title: string
+  url: string
+  score: number
+  isNew: boolean
+}
+
+export type FullAutoArmInput = {
+  productQuery: string
+  foilHint: FoilHint
+  goLiveAt: number
+  warmupMinutes: number
+  fleetSize: number
+  maxOrders: number
+  qtyPerOrder: number
+  cvv: string
+}
+
+export type FullAutoStatus = {
+  phase: FullAutoPhase
+  productQuery: string
+  foilHint: FoilHint
+  goLiveAt: number
+  warmupMinutes: number
+  fleetSize: number
+  maxOrders: number
+  qtyPerOrder: number
+  matchedTitle: string
+  matchedUrl: string
+  ordersConfirmed: number
+  candidates: ProductCandidate[]
+  error?: string
+  hasCvv: boolean
+}
+
 export type AppSettings = ShippingProfile & {
   theme: ThemeId
+  cardHolderName: string
+  cardLast4: string
+  cardExpiry: string
+  hasCard: boolean
+  hasLlmKey: boolean
+}
+
+export type SettingsUpdate = ShippingProfile & {
+  theme: ThemeId
+  cardHolderName?: string
+  cardNumber?: string
+  cardExpiry?: string
+  llmApiKey?: string
 }
 
 export type LairScoutAPI = {
@@ -110,12 +180,16 @@ export type LairScoutAPI = {
   setMuted: (muted: boolean) => Promise<void>
   setFocused: (id: string | null) => Promise<void>
   getSettings: () => Promise<AppSettings>
-  saveSettings: (settings: AppSettings) => Promise<AppSettings>
+  saveSettings: (settings: SettingsUpdate) => Promise<AppSettings>
+  getFullAuto: () => Promise<FullAutoStatus>
+  armFullAuto: (input: FullAutoArmInput) => Promise<FullAutoStatus>
+  disarmFullAuto: () => Promise<FullAutoStatus>
   onUpdate: (cb: (instances: InstanceSnapshot[]) => void) => () => void
   onAdmitted: (cb: (id: string) => void) => () => void
   onQueuePopped: (cb: (id: string) => void) => () => void
   onQueueMessage: (cb: (payload: { foxId: string; notice: QueueNotice }) => void) => () => void
   onRam: (cb: (ram: RamSnapshot) => void) => () => void
   onSettings: (cb: (settings: AppSettings) => void) => () => void
+  onFullAuto: (cb: (status: FullAutoStatus) => void) => () => void
   quit: () => Promise<void>
 }

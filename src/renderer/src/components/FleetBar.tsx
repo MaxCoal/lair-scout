@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import type { RamSnapshot } from '@shared/types'
+import type { AppMode, RamSnapshot } from '@shared/types'
 import { instanceSortLabel, type InstanceSort } from '../sortInstances'
 import mark from '../assets/lair-scout-mark.png'
 
@@ -15,6 +15,8 @@ type Props = {
   ram: RamSnapshot | null
   muted: boolean
   driveAll: boolean
+  mode: AppMode
+  onMode: (mode: AppMode) => void
   onUrl: (value: string) => void
   onSendAll: (event: FormEvent) => void
   onRushCheckout: () => void
@@ -35,6 +37,8 @@ export default function FleetBar({
   ram,
   muted,
   driveAll,
+  mode,
+  onMode,
   onUrl,
   onSendAll,
   onRushCheckout,
@@ -73,7 +77,24 @@ export default function FleetBar({
           <div className="brand-name">
             Lair<span>Scout</span>
           </div>
+          <div className="mode-toggle">
+            <button
+              className={`btn ghost ${mode === 'manual' ? 'active' : ''}`}
+              type="button"
+              onClick={() => onMode('manual')}
+            >
+              Manual
+            </button>
+            <button
+              className={`btn ghost ${mode === 'auto' ? 'active' : ''}`}
+              type="button"
+              onClick={() => onMode('auto')}
+            >
+              Full Auto
+            </button>
+          </div>
         </div>
+        {mode === 'manual' ? (
         <form className="nav-form" onSubmit={onSendAll}>
           <input
             value={url}
@@ -94,6 +115,11 @@ export default function FleetBar({
             {rushing ? 'Rushing…' : 'Cart & queue'}
           </button>
         </form>
+        ) : (
+          <div className="nav-form auto-mode-label">
+            <span className="hint">Full Auto — arm a named drop below. Cart & queue stays in Manual.</span>
+          </div>
+        )}
         <form
           className="stepper"
           onSubmit={(event) => {

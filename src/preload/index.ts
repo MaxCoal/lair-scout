@@ -2,13 +2,16 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type {
   AppSettings,
   ClickPayload,
+  FullAutoArmInput,
+  FullAutoStatus,
   LairScoutAPI,
   InstanceSnapshot,
   KeyPayload,
   MovePayload,
   QueueNotice,
   RamSnapshot,
-  ScrollPayload
+  ScrollPayload,
+  SettingsUpdate
 } from '@shared/types'
 
 const api: LairScoutAPI = {
@@ -41,7 +44,10 @@ const api: LairScoutAPI = {
   setMuted: (muted) => ipcRenderer.invoke('alerts:setMuted', muted),
   setFocused: (id) => ipcRenderer.invoke('instances:setFocused', id),
   getSettings: () => ipcRenderer.invoke('settings:get'),
-  saveSettings: (settings: AppSettings) => ipcRenderer.invoke('settings:save', settings),
+  saveSettings: (settings: SettingsUpdate) => ipcRenderer.invoke('settings:save', settings),
+  getFullAuto: () => ipcRenderer.invoke('fullAuto:get'),
+  armFullAuto: (input: FullAutoArmInput) => ipcRenderer.invoke('fullAuto:arm', input),
+  disarmFullAuto: () => ipcRenderer.invoke('fullAuto:disarm'),
   onUpdate: (cb) => {
     const listener = (_event: unknown, instances: InstanceSnapshot[]): void => cb(instances)
     ipcRenderer.on('instances:update', listener)
@@ -85,6 +91,13 @@ const api: LairScoutAPI = {
     ipcRenderer.on('settings:update', listener)
     return () => {
       ipcRenderer.removeListener('settings:update', listener)
+    }
+  },
+  onFullAuto: (cb) => {
+    const listener = (_event: unknown, status: FullAutoStatus): void => cb(status)
+    ipcRenderer.on('fullAuto:update', listener)
+    return () => {
+      ipcRenderer.removeListener('fullAuto:update', listener)
     }
   },
   quit: () => ipcRenderer.invoke('app:quit')

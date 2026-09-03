@@ -3,10 +3,12 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { join } from 'node:path'
-import type { AppSettings, InstanceSnapshot, RamSnapshot, ShippingProfile } from '@shared/types'
+import type { AppSettings, FullAutoArmInput, FullAutoStatus, InstanceSnapshot, RamSnapshot, SettingsUpdate, ShippingProfile } from '@shared/types'
 import { findScoutWindow, hideScoutWindow, moveScoutWindow, placeScoutWindow, setClipChildren, showWindow, stopWin32Host } from './win32'
 import { readRam } from './memory'
 import { emptySettings, loadSettings, saveSettings } from './settings'
+import { emptyCard, loadCardVault, type CardSecrets } from './cardVault'
+import { FullAutoRunner } from './fullAuto'
 
 const DEFAULT_COUNT = 2
 const MAX_FLEET = 20
@@ -45,8 +47,10 @@ export class ScoutManager {
   private windows = new Map<string, WindowState>()
   private muted = false
   private shuttingDown = false
-  private shipping: ShippingProfile = { name: '', address: '', phone: '' }
+  private shipping: ShippingProfile = { name: '', address: '', phone: '', email: '' }
   private settings: AppSettings = emptySettings()
+  private card: CardSecrets = emptyCard()
+  private fullAuto: FullAutoRunner
   private dockTimer: NodeJS.Timeout | null = null
   private interactTimer: NodeJS.Timeout | null = null
   private ramTimer: NodeJS.Timeout | null = null
@@ -62,6 +66,15 @@ export class ScoutManager {
     this.strayDone = new Promise((resolve) => {
       this.markStrayDone = resolve
     })
+    this.fullAuto = new FullAutoRunner({
+      scaleTo: (count) => this.scaleTo(count),
+      workerIds: () => [...this.workers.keys()],
+      callOn: (id, cmd, payload, timeoutMs) => this.callOn(id, cmd, payload, timeoutMs),
+      fireOn: (id, cmd, payload) => this.fireOn(id, cmd, payload),
+      shipping: () => this.shipping,
+      card: () => this.card
+    })
+    this.fullAuto.onStatus((status) => this.broadcastFullAuto(status))
   }
 
   attach(window: BrowserWindow): void {
@@ -69,9 +82,15 @@ export class ScoutManager {
     this.armDockTimer()
     this.armInteractTimer()
     this.armRamTimer()
-    void loadSettings().then((settings) => {
+    void loadSettings().then(async (settings) => {
       this.settings = settings
-      this.shipping = { name: settings.name, address: settings.address, phone: settings.phone }
+      this.shipping = {
+        name: settings.name,
+        address: settings.address,
+        phone: settings.phone,
+        email: settings.email
+      }
+      this.card = await loadCardVault()
       this.broadcastSettings()
       void this.pushProfile()
     })
@@ -87,9 +106,27 @@ export class ScoutManager {
     return this.settings
   }
 
-  async saveProfile(settings: AppSettings): Promise<AppSettings> {
+  getFullAuto(): FullAutoStatus {
+    return this.fullAuto.status
+  }
+
+  async armFullAuto(input: FullAutoArmInput): Promise<FullAutoStatus> {
+    return this.fullAuto.arm(input)
+  }
+
+  async disarmFullAuto(): Promise<FullAutoStatus> {
+    return this.fullAuto.disarm()
+  }
+
+  async saveProfile(settings: SettingsUpdate): Promise<AppSettings> {
     this.settings = await saveSettings(settings)
-    this.shipping = { name: this.settings.name, address: this.settings.address, phone: this.settings.phone }
+    this.shipping = {
+      name: this.settings.name,
+      address: this.settings.address,
+      phone: this.settings.phone,
+      email: this.settings.email
+    }
+    this.card = await loadCardVault()
     this.broadcastSettings()
     await this.pushProfile()
     return this.settings
@@ -115,7 +152,12 @@ export class ScoutManager {
 
   activeCount(): number {
     return this.snapshots.filter(
-      (s) => s.status === 'in_queue' || s.status === 'waiting_for_queue' || s.status === 'admitted'
+      (s) =>
+        s.status === 'in_queue' ||
+        s.status === 'waiting_for_queue' ||
+        s.status === 'admitted' ||
+        s.status === 'purchasing' ||
+        s.status === 'hunting'
     ).length
   }
 
@@ -178,6 +220,7 @@ export class ScoutManager {
       })
     }
     this.broadcast()
+    void this.fullAuto.onWorkerReady(id)
     return id
   }
 
@@ -329,6 +372,7 @@ export class ScoutManager {
 
   async shutdown(): Promise<void> {
     this.shuttingDown = true
+    await this.fullAuto.shutdown()
     if (this.dockTimer) clearInterval(this.dockTimer)
     if (this.interactTimer) clearInterval(this.interactTimer)
     if (this.ramTimer) clearInterval(this.ramTimer)
@@ -623,6 +667,13 @@ export class ScoutManager {
     if (message.type === 'event' && message.event === 'admitted') {
       const id = String(message.payload)
       this.emitAlert('instances:admitted', id, `Scout ${id} is through the queue`)
+      void this.fullAuto.onAdmitted(id)
+      return
+    }
+
+    if (message.type === 'event' && message.event === 'readyForPayment') {
+      const id = String(message.payload)
+      void this.fullAuto.onReadyForPayment(id)
       return
     }
 
@@ -739,6 +790,12 @@ export class ScoutManager {
     const list = this.list()
     for (const win of BrowserWindow.getAllWindows()) {
       if (!win.isDestroyed()) win.webContents.send('instances:update', list)
+    }
+  }
+
+  private broadcastFullAuto(status: FullAutoStatus): void {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send('fullAuto:update', status)
     }
   }
 }

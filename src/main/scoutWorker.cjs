@@ -28,7 +28,10 @@ let focusedId = null
 let shuttingDown = false
 let ticking = false
 let spawning = false
-let shippingProfile = { name: '', address: '', phone: '' }
+let shippingProfile = { name: '', address: '', phone: '', email: '' }
+let paymentProfile = { holderName: '', number: '', expiry: '', cvv: '' }
+let autoQty = 1
+let autoAborted = false
 
 function send(message) {
   process.stdout.write(`${JSON.stringify(message)}\n`)
@@ -84,6 +87,10 @@ function statusLabel(status, waitTime) {
     return `In Queue, ${waitTime}`
   }
   if (status === 'admitted') return 'Admitted'
+  if (status === 'hunting') return 'Hunting…'
+  if (status === 'purchasing') return 'Purchasing…'
+  if (status === 'purchased') return 'Purchased'
+  if (status === 'aborted') return 'Aborted'
   if (status === 'loading') return 'Loading'
   if (status === 'error') return 'Error'
   return 'Idle'
@@ -448,8 +455,9 @@ const AUTO_RESTART_MS = 90000 // auto-restart a scout that has been unhealthy th
 function snapshot(fox) {
   const now = Date.now()
   const unhealthy =
-    fox.status === 'error' ||
-    (fox.lastShotAt > 0 && now - fox.lastShotAt > STALE_MS && fox.status !== 'idle' && !fox.navigating)
+    !isHeldStatus(fox.status) &&
+    (fox.status === 'error' ||
+      (fox.lastShotAt > 0 && now - fox.lastShotAt > STALE_MS && fox.status !== 'idle' && !fox.navigating))
   return {
     id: fox.id,
     url: fox.url,
@@ -543,7 +551,8 @@ function parseAddress(profile) {
     state,
     zip,
     address: raw,
-    phone: String(profile?.phone || '').trim()
+    phone: String(profile?.phone || '').trim(),
+    email: String(profile?.email || '').trim()
   }
 }
 
@@ -581,7 +590,10 @@ function fillProfileInPage(data) {
     const type = (el.getAttribute('type') || 'text').toLowerCase()
     if (['hidden', 'checkbox', 'radio', 'password', 'submit', 'button', 'file'].includes(type)) continue
     const blob = blobOf(el)
-    if (/email/.test(blob)) continue
+    if (/email/.test(blob)) {
+      if (data.email) filled += setValue(el, data.email) ? 1 : 0
+      continue
+    }
     const isFirst = /first[-_\s]?name|given[-_\s]?name/.test(blob)
     const isLast = /last[-_\s]?name|family[-_\s]?name|surname/.test(blob)
     const isFullName =
@@ -604,7 +616,7 @@ function fillProfileInPage(data) {
 
 async function applyShippingToFox(fox) {
   const page = pageOf(fox)
-  if (!page || (!shippingProfile.name && !shippingProfile.address)) return
+  if (!page || (!shippingProfile.name && !shippingProfile.address && !shippingProfile.email)) return
   await page.evaluate(fillProfileInPage, parseAddress(shippingProfile)).catch(() => 0)
 }
 
@@ -736,6 +748,10 @@ async function navigate(fox, url) {
   }
 }
 
+function isHeldStatus(status) {
+  return status === 'hunting' || status === 'purchasing' || status === 'purchased' || status === 'aborted'
+}
+
 async function inspectFox(fox) {
   const page = pageOf(fox)
   if (!page) {
@@ -749,13 +765,19 @@ async function inspectFox(fox) {
     const read = await inspectPage(page, previous, fox.wasInQueue)
     if (read.status === 'in_queue' || read.status === 'waiting_for_queue') fox.wasInQueue = true
     fox.navigating = false
+    fox.url = read.url
+    fox.host = read.host
+    fox.title = read.title
+    if (isHeldStatus(fox.status)) {
+      if (fox.status === 'hunting') fox.statusLabel = fox.statusLabel || 'Hunting…'
+      const notice = read.queueNotice
+      fox.queueNotice = notice
+      return
+    }
     fox.status = read.status
     fox.statusLabel = read.statusLabel
     fox.waitTime = read.waitTime
     fox.queueNumber = read.queueNumber
-    fox.url = read.url
-    fox.host = read.host
-    fox.title = read.title
     fox.error = read.status === 'error' ? fox.error || 'Could not read page' : undefined
     const notice = read.queueNotice
     fox.queueNotice = notice
@@ -806,6 +828,7 @@ async function mapPool(items, limit, fn) {
 }
 
 function isUnhealthy(fox) {
+  if (isHeldStatus(fox.status)) return false
   const now = Date.now()
   return (
     fox.status === 'error' ||
@@ -877,6 +900,7 @@ function setRushLabel(fox, label) {
 async function clickByScript(page, fn, timeoutMs) {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
+    if (autoAborted) throw new Error('Full Auto aborted')
     const ok = await page.evaluate(fn).catch(() => false)
     if (ok) return true
     await wait(150)
@@ -1037,6 +1061,335 @@ async function rushCheckoutFox(fox) {
   }
 }
 
+function throwIfAborted() {
+  if (autoAborted) throw new Error('Full Auto aborted')
+}
+
+function scrapeProductLinks() {
+  const out = []
+  const seen = new Set()
+  const nodes = [...document.querySelectorAll('a[href*="/product/"]')]
+  for (const a of nodes) {
+    const href = a.href || a.getAttribute('href') || ''
+    if (!/\/product\/\d+/i.test(href)) continue
+    let url = href
+    try {
+      const parsed = new URL(href, location.origin)
+      parsed.hash = ''
+      parsed.search = ''
+      parsed.pathname = parsed.pathname.replace(/\/+$/, '')
+      url = parsed.toString()
+    } catch {
+      /* keep href */
+    }
+    if (seen.has(url)) continue
+    seen.add(url)
+    let title = (a.getAttribute('aria-label') || a.getAttribute('title') || a.innerText || '').replace(/\s+/g, ' ').trim()
+    if (title.length < 4) {
+      const card = a.closest('article, li, .product, .card, [class*="product"]')
+      const heading = card?.querySelector('h1, h2, h3, h4, .product-title, .title, [class*="title"]')
+      title = (heading?.innerText || title).replace(/\s+/g, ' ').trim()
+    }
+    if (!title) {
+      const slug = url.split('/').filter(Boolean).pop() || ''
+      title = decodeURIComponent(slug).replace(/-/g, ' ')
+    }
+    out.push({ url, title })
+  }
+  return out
+}
+
+function setQtyInPage(n) {
+  const want = String(n)
+  const blobOf = (el) =>
+    [el.id, el.name, el.placeholder, el.getAttribute('aria-label'), el.autocomplete, el.getAttribute('ng-model'), el.getAttribute('data-internal-id')]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+  const setValue = (el, value) => {
+    if (!el || el.disabled || el.readOnly) return false
+    if (el.tagName === 'SELECT') {
+      const opt = [...el.options].find((item) => item.value === value || item.text.trim() === value)
+      if (!opt) return false
+      el.value = opt.value
+    } else {
+      const proto = HTMLInputElement.prototype
+      const desc = Object.getOwnPropertyDescriptor(proto, 'value')
+      if (desc && desc.set) desc.set.call(el, value)
+      else el.value = value
+    }
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+    el.dispatchEvent(new Event('change', { bubbles: true }))
+    return true
+  }
+  const nodes = [...document.querySelectorAll('input, select')]
+  let handled = false
+  let ok = false
+  for (const el of nodes) {
+    const type = (el.getAttribute('type') || 'text').toLowerCase()
+    if (['hidden', 'checkbox', 'radio', 'password', 'submit', 'button', 'file'].includes(type)) continue
+    const blob = blobOf(el)
+    const isQty = type === 'number' || /qty|quantity/i.test(blob)
+    if (!isQty) continue
+    const r = el.getBoundingClientRect()
+    if (r.width < 8 || r.height < 8) continue
+    handled = true
+    if (setValue(el, want) && (el.value === want || Number(el.value) === n)) ok = true
+  }
+  if (!handled) return n === 1
+  if (ok) return true
+  const numberInput = nodes.find((el) => (el.getAttribute('type') || '').toLowerCase() === 'number')
+  return numberInput ? Number(numberInput.value) === n : false
+}
+
+function readCartQtyOk(n) {
+  const blobOf = (el) =>
+    [el.id, el.name, el.placeholder, el.getAttribute('aria-label'), el.autocomplete, el.getAttribute('ng-model'), el.getAttribute('data-internal-id')]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+  const nodes = [...document.querySelectorAll('input, select')]
+  let found = false
+  for (const el of nodes) {
+    const type = (el.getAttribute('type') || 'text').toLowerCase()
+    const blob = blobOf(el)
+    if (type !== 'number' && !/qty|quantity/i.test(blob)) continue
+    const r = el.getBoundingClientRect()
+    if (r.width < 8 || r.height < 8) continue
+    found = true
+    if (Number(el.value) !== n && String(el.value) !== String(n)) return false
+  }
+  if (!found) return n === 1
+  return true
+}
+
+function parseCardExpiry(raw) {
+  const text = String(raw || '').trim()
+  const match = text.match(/(\d{1,2})\s*[/\-]\s*(\d{2,4})/)
+  if (!match) return { month: '', year: '', yearLong: '', combined: text }
+  const month = match[1].padStart(2, '0')
+  let year = match[2]
+  const yearLong = year.length === 2 ? `20${year}` : year
+  if (year.length === 4) year = year.slice(-2)
+  return { month, year, yearLong, combined: `${month} / ${year}` }
+}
+
+function fillCardInPage(data) {
+  if (!data || !data.number) return 0
+  const setValue = (el, value) => {
+    if (!el || !value || el.disabled || el.readOnly) return false
+    const tag = el.tagName
+    if (tag === 'SELECT') {
+      const want = String(value).toLowerCase()
+      const opt = [...el.options].find(
+        (item) => item.value.toLowerCase() === want || item.text.toLowerCase() === want || item.value === String(value)
+      )
+      if (!opt) return false
+      el.value = opt.value
+    } else {
+      const proto = tag === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+      const desc = Object.getOwnPropertyDescriptor(proto, 'value')
+      if (desc && desc.set) desc.set.call(el, value)
+      else el.value = value
+    }
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+    el.dispatchEvent(new Event('change', { bubbles: true }))
+    return true
+  }
+  const blobOf = (el) =>
+    [el.id, el.name, el.placeholder, el.getAttribute('aria-label'), el.autocomplete, el.getAttribute('ng-model'), el.getAttribute('data-internal-id')]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+  let filled = 0
+  const nodes = [...document.querySelectorAll('input, textarea, select')]
+  for (const el of nodes) {
+    const type = (el.getAttribute('type') || 'text').toLowerCase()
+    if (['hidden', 'checkbox', 'radio', 'submit', 'button', 'file'].includes(type)) continue
+    const blob = blobOf(el)
+    const isCard = /card[-_\s]?number|cc[-_\s]?number|cardnumber|ccnum|\bpan\b/.test(blob) || el.autocomplete === 'cc-number'
+    const isHolder = /card[-_\s]?name|cc[-_\s]?name|name[-_\s]?on[-_\s]?card|cardholder|holder/.test(blob) || el.autocomplete === 'cc-name'
+    const isMonth = /exp.*month|cc[-_\s]?exp[-_\s]?month|expiry[-_\s]?month/.test(blob) || el.autocomplete === 'cc-exp-month'
+    const isYear = /exp.*year|cc[-_\s]?exp[-_\s]?year|expiry[-_\s]?year/.test(blob) || el.autocomplete === 'cc-exp-year'
+    const isExp = /expir|cc[-_\s]?exp|valid[-_\s]?thru/.test(blob) || el.autocomplete === 'cc-exp'
+    const isCvv = /cvv|cvc|cid|security[-_\s]?code|card[-_\s]?code/.test(blob) || el.autocomplete === 'cc-csc'
+    if (isCard && data.number) filled += setValue(el, data.number) ? 1 : 0
+    else if (isHolder && data.holderName) filled += setValue(el, data.holderName) ? 1 : 0
+    else if (isMonth && data.month) filled += setValue(el, data.month) ? 1 : 0
+    else if (isYear && (data.yearLong || data.year)) filled += setValue(el, data.yearLong) || setValue(el, data.year) ? 1 : 0
+    else if (isExp && !isMonth && !isYear && data.combined) filled += setValue(el, data.combined) ? 1 : 0
+    else if (isCvv && data.cvv) filled += setValue(el, data.cvv) ? 1 : 0
+  }
+  return filled
+}
+
+function scriptClickPlaceOrder() {
+  function shown(el) {
+    if (!el) return false
+    const r = el.getBoundingClientRect()
+    if (r.width < 8 || r.height < 8) return false
+    const s = getComputedStyle(el)
+    return s.display !== 'none' && s.visibility !== 'hidden' && Number(s.opacity) > 0
+  }
+  const pool = [...document.querySelectorAll('button, input[type="submit"], a[role="button"], a.btn')]
+  const matches = pool.filter((el) => {
+    if (el.disabled || !shown(el)) return false
+    const text = (el.innerText || el.value || el.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim()
+    if (/add to cart|preorder|view cart|continue as guest/i.test(text)) return false
+    return /place order|pay now|submit order|complete (your )?order|confirm (purchase|order)|buy now/i.test(text)
+  })
+  if (!matches.length) return false
+  matches[0].click()
+  return true
+}
+
+async function scrapeProductsFox(fox) {
+  if (!fox) return { products: [] }
+  const page = pageOf(fox)
+  if (!page) return { products: [] }
+  const products = await page.evaluate(scrapeProductLinks).catch(() => [])
+  return { products: Array.isArray(products) ? products : [] }
+}
+
+async function fillPaymentOnPage(page) {
+  const expiry = parseCardExpiry(paymentProfile.expiry)
+  const data = {
+    holderName: paymentProfile.holderName || shippingProfile.name,
+    number: String(paymentProfile.number || '').replace(/\s+/g, ''),
+    cvv: paymentProfile.cvv,
+    month: expiry.month,
+    year: expiry.year,
+    yearLong: expiry.yearLong,
+    combined: expiry.combined
+  }
+  for (const frame of page.frames()) {
+    await frame.evaluate(fillCardInPage, data).catch(() => 0)
+  }
+  const tries = [
+    { selectors: ['input[autocomplete="cc-number"]', 'input[name="cardnumber"]', 'input[id*="cardNumber" i]', '#cardNumber'], value: data.number },
+    { selectors: ['input[autocomplete="cc-exp"]', 'input[name="exp-date"]', 'input[id*="exp" i]'], value: data.combined },
+    { selectors: ['input[autocomplete="cc-csc"]', 'input[name="cvc"]', 'input[name="cvv"]', 'input[id*="cvv" i]', 'input[id*="cvc" i]'], value: data.cvv },
+    { selectors: ['input[autocomplete="cc-name"]', 'input[name*="cardholder" i]', 'input[id*="cardName" i]'], value: data.holderName }
+  ]
+  for (const tryFill of tries) {
+    if (!tryFill.value) continue
+    for (const frame of page.frames()) {
+      for (const sel of tryFill.selectors) {
+        const loc = frame.locator(sel).first()
+        const visible = await loc.isVisible().catch(() => false)
+        if (!visible) continue
+        await loc.click({ force: true }).catch(() => undefined)
+        await loc.fill(tryFill.value).catch(async () => {
+          await loc.pressSequentially(String(tryFill.value), { delay: 15 }).catch(() => undefined)
+        })
+      }
+    }
+  }
+}
+
+async function waitForConfirmation(page, timeoutMs) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    throwIfAborted()
+    const ok = await page
+      .evaluate(() => {
+        const url = location.href
+        if (/thank|confirm|order-complete|checkout\/success|order\/success|receipt/i.test(url)) return true
+        const text = document.body?.innerText || ''
+        return /thank you for (your )?order|order (has been )?placed|your order number|order confirmation|thanks for (your )?purchase/i.test(
+          text
+        )
+      })
+      .catch(() => false)
+    if (ok) return true
+    await wait(400)
+  }
+  return false
+}
+
+async function autoRushFox(fox, qty) {
+  throwIfAborted()
+  autoQty = Math.max(1, Number(qty) || 1)
+  const page = pageOf(fox)
+  if (!page) throw new Error(`Scout ${fox.id} has no page`)
+  if (isOnQueue(page.url())) return
+  setRushLabel(fox, `Setting qty ${autoQty}…`)
+  const qtyOk = await page.evaluate(setQtyInPage, autoQty).catch(() => false)
+  if (!qtyOk) {
+    fox.status = 'error'
+    fox.error = `Could not set quantity to ${autoQty}`
+    fox.statusLabel = 'Error'
+    emitUpdate()
+    throw new Error(fox.error)
+  }
+  await runRushCheckout(fox, page)
+  await inspectFox(fox)
+  throwIfAborted()
+  if (!isOnQueue(page.url()) && fox.status !== 'in_queue' && fox.status !== 'waiting_for_queue') {
+    send({ type: 'event', event: 'readyForPayment', payload: fox.id })
+  }
+}
+
+function scriptHasPlaceOrder() {
+  const pool = [...document.querySelectorAll('button, input[type="submit"], a[role="button"], a.btn')]
+  return pool.some((el) => {
+    if (el.disabled) return false
+    const r = el.getBoundingClientRect()
+    if (r.width < 8 || r.height < 8) return false
+    const text = (el.innerText || el.value || el.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim()
+    if (/add to cart|preorder|view cart|continue as guest/i.test(text)) return false
+    return /place order|pay now|submit order|complete (your )?order|confirm (purchase|order)|buy now/i.test(text)
+  })
+}
+
+async function completeCheckoutFox(fox) {
+  throwIfAborted()
+  const page = pageOf(fox)
+  if (!page) throw new Error(`Scout ${fox.id} has no page`)
+  fox.status = 'purchasing'
+  fox.statusLabel = 'Opening checkout…'
+  fox.error = undefined
+  emitUpdate()
+  const leaveQueue = Date.now() + 45000
+  while (Date.now() < leaveQueue && isOnQueue(page.url())) {
+    throwIfAborted()
+    await wait(300)
+  }
+  fox.statusLabel = 'Filling payment…'
+  emitUpdate()
+  const readyUntil = Date.now() + 25000
+  while (Date.now() < readyUntil) {
+    throwIfAborted()
+    await page.evaluate(fillProfileInPage, parseAddress(shippingProfile)).catch(() => 0)
+    await fillPaymentOnPage(page)
+    const canPlace = await page.evaluate(scriptHasPlaceOrder).catch(() => false)
+    if (canPlace) break
+    await wait(400)
+  }
+  const qtyOk = await page.evaluate(readCartQtyOk, autoQty).catch(() => false)
+  if (!qtyOk) throw new Error(`Cart quantity is not ${autoQty}`)
+  fox.statusLabel = 'Placing order…'
+  emitUpdate()
+  throwIfAborted()
+  if (!(await clickByScript(page, scriptClickPlaceOrder, 20000))) {
+    throw new Error('Could not find Place order')
+  }
+  fox.statusLabel = 'Waiting for confirmation…'
+  emitUpdate()
+  const confirmed = await waitForConfirmation(page, 90000)
+  if (!confirmed) throw new Error('No order confirmation')
+  fox.status = 'purchased'
+  fox.statusLabel = 'Purchased'
+  emitUpdate()
+}
+
+function abortFox(fox) {
+  if (fox.status === 'purchased') return
+  fox.status = 'aborted'
+  fox.statusLabel = 'Aborted'
+  fox.navigating = false
+}
+
 async function handle(msg) {
   const { requestId, cmd } = msg
   try {
@@ -1055,14 +1408,68 @@ async function handle(msg) {
         await Promise.allSettled([...instances.values()].map((fox) => navigate(fox, target)))
       }
     } else if (cmd === 'rushCheckout') {
+      autoAborted = false
       await Promise.allSettled([...instances.values()].map((fox) => rushCheckoutFox(fox)))
     } else if (cmd === 'setProfile') {
       shippingProfile = {
         name: String(msg.profile?.name || ''),
         address: String(msg.profile?.address || ''),
-        phone: String(msg.profile?.phone || '')
+        phone: String(msg.profile?.phone || ''),
+        email: String(msg.profile?.email || '')
       }
       await Promise.allSettled([...instances.values()].map((fox) => applyShippingToFox(fox)))
+    } else if (cmd === 'setAutoRun') {
+      autoAborted = false
+      autoQty = Math.max(1, Number(msg.qtyPerOrder) || 1)
+      if (msg.profile) {
+        shippingProfile = {
+          name: String(msg.profile?.name || ''),
+          address: String(msg.profile?.address || ''),
+          phone: String(msg.profile?.phone || ''),
+          email: String(msg.profile?.email || '')
+        }
+      }
+      if (msg.payment) {
+        paymentProfile = {
+          holderName: String(msg.payment?.holderName || ''),
+          number: String(msg.payment?.number || ''),
+          expiry: String(msg.payment?.expiry || ''),
+          cvv: String(msg.payment?.cvv || '')
+        }
+      }
+    } else if (cmd === 'setHunting') {
+      const fox = instances.get(msg.foxId)
+      if (fox && fox.status !== 'purchased' && fox.status !== 'purchasing' && fox.status !== 'aborted') {
+        fox.status = 'hunting'
+        fox.statusLabel = 'Hunting…'
+        fox.error = undefined
+        emitUpdate()
+      }
+    } else if (cmd === 'scrapeProducts') {
+      const fox = instances.get(msg.foxId) || [...instances.values()][0]
+      result = await scrapeProductsFox(fox)
+    } else if (cmd === 'autoRush') {
+      const fox = instances.get(msg.foxId)
+      if (!fox) throw new Error(`Scout ${msg.foxId} has no page`)
+      await autoRushFox(fox, msg.qtyPerOrder)
+    } else if (cmd === 'completeCheckout') {
+      const fox = instances.get(msg.foxId)
+      if (!fox) throw new Error(`Scout ${msg.foxId} has no page`)
+      try {
+        await completeCheckoutFox(fox)
+      } catch (error) {
+        if (fox.status !== 'purchased' && fox.status !== 'aborted') {
+          fox.status = 'error'
+          fox.error = error instanceof Error ? error.message : String(error)
+          fox.statusLabel = 'Error'
+          emitUpdate()
+        }
+        throw error
+      }
+    } else if (cmd === 'abortAuto') {
+      autoAborted = true
+      for (const fox of instances.values()) abortFox(fox)
+      emitUpdate()
     } else if (cmd === 'reload') {
       const fox = instances.get(msg.foxId)
       if (fox) {
@@ -1134,6 +1541,7 @@ async function handle(msg) {
 }
 
 const INPUT_CMDS = new Set(['move', 'click', 'key', 'scroll'])
+const INTERRUPT_CMDS = new Set(['abortAuto'])
 const rl = readline.createInterface({ input: process.stdin })
 let chain = Promise.resolve()
 rl.on('line', (line) => {
@@ -1144,6 +1552,10 @@ rl.on('line', (line) => {
       if (msg.requestId) send({ type: 'result', requestId: msg.requestId, ok: true })
       return
     }
+    void handle(msg)
+    return
+  }
+  if (INTERRUPT_CMDS.has(msg.cmd)) {
     void handle(msg)
     return
   }
