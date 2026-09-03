@@ -5,7 +5,7 @@ import { app } from 'electron'
 import type { AppSettings, ThemeId } from '@shared/types'
 
 export function emptySettings(): AppSettings {
-  return { name: '', address: '', theme: 'dungeon' }
+  return { name: '', address: '', phone: '', theme: 'dungeon' }
 }
 
 function parseTheme(value: unknown): ThemeId {
@@ -25,6 +25,7 @@ export async function loadSettings(): Promise<AppSettings> {
     return {
       name: String(raw.name || ''),
       address: String(raw.address || ''),
+      phone: String(raw.phone || ''),
       theme: parseTheme(raw.theme)
     }
   } catch {
@@ -36,6 +37,7 @@ export async function saveSettings(settings: AppSettings): Promise<AppSettings> 
   const next: AppSettings = {
     name: String(settings.name || '').trim(),
     address: String(settings.address || '').trim(),
+    phone: String(settings.phone || '').trim(),
     theme: parseTheme(settings.theme)
   }
   await writeFile(settingsPath(), `${JSON.stringify(next, null, 2)}\n`, 'utf8')

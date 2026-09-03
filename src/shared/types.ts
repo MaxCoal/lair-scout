@@ -31,6 +31,8 @@ export type InstanceSnapshot = {
   focused?: boolean
   error?: string
   admittedFlash: boolean
+  admittedAt?: number   // epoch ms when admitted; undefined if not yet admitted
+  unhealthy?: boolean   // true when the scout appears stalled or crashed
 }
 
 export type ClickPayload = {
@@ -77,6 +79,7 @@ export type RamSnapshot = {
 export type ShippingProfile = {
   name: string
   address: string
+  phone: string
 }
 
 export type ThemeId = 'dungeon' | 'daylight'

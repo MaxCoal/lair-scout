@@ -529,6 +529,11 @@ input {
   animation: pulse 1.6s ease-in-out infinite;
 }
 
+.tile.error {
+  border-color: rgba(224, 122, 106, 0.55);
+  box-shadow: 0 0 16px rgba(224, 122, 106, 0.12);
+}
+
 .tile img,
 .focus-stage img {
   width: 100%;
@@ -574,6 +579,30 @@ input {
 
 .tile-overlay .chip {
   background: rgba(0, 0, 0, 0.5);
+}
+
+.countdown {
+  color: var(--admitted);
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+}
+
+.tile.admitted .countdown,
+.tile.flash .countdown {
+  animation: pulse-text 1s ease-in-out infinite alternate;
+}
+
+@keyframes pulse-text {
+  from { opacity: 1; }
+  to   { opacity: 0.55; }
+}
+
+.badge-unhealthy {
+  margin-left: 5px;
+  font-size: 12px;
+  color: var(--loading);
+  cursor: default;
 }
 
 .tile-actions {

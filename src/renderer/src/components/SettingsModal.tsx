@@ -15,6 +15,7 @@ const THEMES: { id: ThemeId; label: string; blurb: string }[] = [
 export default function SettingsModal({ open, onClose }: Props) {
   const [name, setName] = useState('')
   const [address, setAddress] = useState('')
+  const [phone, setPhone] = useState('')
   const [theme, setTheme] = useState<ThemeId>('dungeon')
   const [saved, setSaved] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -25,6 +26,7 @@ export default function SettingsModal({ open, onClose }: Props) {
     void window.lairscout.getSettings().then((settings) => {
       setName(settings.name)
       setAddress(settings.address)
+      setPhone(settings.phone ?? '')
       setTheme(settings.theme)
       applyTheme(settings.theme)
     })
@@ -39,6 +41,7 @@ export default function SettingsModal({ open, onClose }: Props) {
       .then((settings) => {
         setName(settings.name)
         setAddress(settings.address)
+        setPhone(settings.phone ?? '')
         setTheme(settings.theme)
         applyTheme(settings.theme)
         setSaved(true)
@@ -48,13 +51,13 @@ export default function SettingsModal({ open, onClose }: Props) {
 
   const onSave = (event: FormEvent): void => {
     event.preventDefault()
-    void persist({ name, address, theme })
+    void persist({ name, address, phone, theme })
   }
 
   const onPickTheme = (next: ThemeId): void => {
     setTheme(next)
     applyTheme(next)
-    void persist({ name, address, theme: next })
+    void persist({ name, address, phone, theme: next })
   }
 
   return (
@@ -101,6 +104,15 @@ export default function SettingsModal({ open, onClose }: Props) {
             onChange={(event) => setAddress(event.target.value)}
             rows={4}
             placeholder={'123 Main St\nSpringfield, IL 62701'}
+          />
+        </label>
+        <label className="field">
+          <span>Phone</span>
+          <input
+            value={phone}
+            onChange={(event) => setPhone(event.target.value)}
+            placeholder="555-867-5309"
+            inputMode="tel"
           />
         </label>
         <div className="top-actions" style={{ justifyContent: 'flex-end' }}>

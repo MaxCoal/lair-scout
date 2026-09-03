@@ -28,7 +28,7 @@ let focusedId = null
 let shuttingDown = false
 let ticking = false
 let spawning = false
-let shippingProfile = { name: '', address: '' }
+let shippingProfile = { name: '', address: '', phone: '' }
 
 function send(message) {
   process.stdout.write(`${JSON.stringify(message)}\n`)
@@ -442,7 +442,14 @@ async function onPages(foxId, fn) {
   )
 }
 
+const STALE_MS = 45000        // mark unhealthy if no screenshot update for this long
+const AUTO_RESTART_MS = 90000 // auto-restart a scout that has been unhealthy this long
+
 function snapshot(fox) {
+  const now = Date.now()
+  const unhealthy =
+    fox.status === 'error' ||
+    (fox.lastShotAt > 0 && now - fox.lastShotAt > STALE_MS && fox.status !== 'idle' && !fox.navigating)
   return {
     id: fox.id,
     url: fox.url,
@@ -455,7 +462,9 @@ function snapshot(fox) {
     queueNotice: fox.queueNotice,
     screenshot: fox.screenshot,
     error: fox.error,
-    admittedFlash: Date.now() < fox.admittedFlashUntil,
+    admittedFlash: now < fox.admittedFlashUntil,
+    admittedAt: fox.admittedAt || undefined,
+    unhealthy,
     focused: focusedId === fox.id
   }
 }
@@ -533,7 +542,8 @@ function parseAddress(profile) {
     city,
     state,
     zip,
-    address: raw
+    address: raw,
+    phone: String(profile?.phone || '').trim()
   }
 }
 
@@ -587,6 +597,7 @@ function fillProfileInPage(data) {
     else if (/city|town|locality/.test(blob) && data.city) filled += setValue(el, data.city) ? 1 : 0
     else if (/state|province|region/.test(blob) && data.state) filled += setValue(el, data.state) ? 1 : 0
     else if (/zip|postal|postcode/.test(blob) && data.zip) filled += setValue(el, data.zip) ? 1 : 0
+    else if (/phone|mobile|telephone|tel\b/.test(blob) && data.phone) filled += setValue(el, data.phone) ? 1 : 0
   }
   return filled
 }
@@ -667,6 +678,8 @@ async function spawnFox(foxId, profileDir) {
       host: '',
       title: `Scout ${foxId}`,
       admittedFlashUntil: 0,
+      admittedAt: 0,
+      lastShotAt: 0,
       navigating: false
     }
     context.on('page', (newPage) => {
@@ -757,6 +770,7 @@ async function inspectFox(fox) {
     }
     if (isAdmissionEdge(previous, fox.status)) {
       fox.admittedFlashUntil = Date.now() + 12000
+      fox.admittedAt = Date.now()
       send({ type: 'event', event: 'admitted', payload: fox.id })
     }
   } catch (error) {
@@ -772,6 +786,7 @@ async function shotFox(fox) {
     const quality = focusedId === fox.id ? 58 : 38
     const buffer = await page.screenshot({ type: 'jpeg', quality })
     fox.screenshot = `data:image/jpeg;base64,${buffer.toString('base64')}`
+    fox.lastShotAt = Date.now()
   } catch {
     /* keep last frame */
   }
@@ -790,6 +805,14 @@ async function mapPool(items, limit, fn) {
   )
 }
 
+function isUnhealthy(fox) {
+  const now = Date.now()
+  return (
+    fox.status === 'error' ||
+    (fox.lastShotAt > 0 && now - fox.lastShotAt > STALE_MS && fox.status !== 'idle' && !fox.navigating)
+  )
+}
+
 async function tick() {
   if (ticking || shuttingDown) {
     scheduleTick()
@@ -799,6 +822,26 @@ async function tick() {
   try {
     const foxes = [...instances.values()]
     await Promise.allSettled(foxes.map((fox) => inspectFox(fox)))
+
+    // Auto-restart scouts that have been unhealthy long enough.
+    const now = Date.now()
+    for (const fox of foxes) {
+      if (!isUnhealthy(fox)) {
+        fox.unhealthySince = 0
+        continue
+      }
+      if (!fox.unhealthySince) {
+        fox.unhealthySince = now
+        continue
+      }
+      if (now - fox.unhealthySince >= AUTO_RESTART_MS) {
+        fox.unhealthySince = 0
+        process.stderr.write(`[auto-restart ${fox.id}] unhealthy for ${AUTO_RESTART_MS / 1000}s, restarting\n`)
+        send({ type: 'event', event: 'autoRestart', payload: fox.id })
+        // The manager handles the actual restart; we just flag it.
+      }
+    }
+
     emitUpdate()
     const live = pausedIds.size > 0
     if (!live && foxes.length) {
@@ -1016,7 +1059,8 @@ async function handle(msg) {
     } else if (cmd === 'setProfile') {
       shippingProfile = {
         name: String(msg.profile?.name || ''),
-        address: String(msg.profile?.address || '')
+        address: String(msg.profile?.address || ''),
+        phone: String(msg.profile?.phone || '')
       }
       await Promise.allSettled([...instances.values()].map((fox) => applyShippingToFox(fox)))
     } else if (cmd === 'reload') {

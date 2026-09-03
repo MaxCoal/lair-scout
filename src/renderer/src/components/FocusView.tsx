@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import type { InstanceSnapshot } from '@shared/types'
 import { StatusChip, statusDetail } from './status'
+import { useAdmittedTimer } from '../useAdmittedTimer'
 import { eventCoords, mouseButton, targetId } from '../input'
 
 type Props = {
@@ -15,6 +16,7 @@ type Props = {
 export default function FocusView({ fox, driveAll, fleetCount, live, onBack, onRestart }: Props) {
   const stageRef = useRef<HTMLDivElement>(null)
   const lastMove = useRef(0)
+  const countdown = useAdmittedTimer(fox)
 
   useEffect(() => {
     stageRef.current?.focus()
@@ -102,7 +104,7 @@ export default function FocusView({ fox, driveAll, fleetCount, live, onBack, onR
               ? 'Click and type directly in this window'
               : driveAll
                 ? `Mirroring to ${fleetCount}`
-                : statusDetail(fox) || fox.host}
+                : countdown || statusDetail(fox) || fox.host}
           </div>
         </div>
         <div className="top-actions">

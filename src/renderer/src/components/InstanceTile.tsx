@@ -2,6 +2,7 @@ import { useRef } from 'react'
 import type { InstanceSnapshot } from '@shared/types'
 import { StatusChip, statusDetail } from './status'
 import { eventCoords, mouseButton, targetId } from '../input'
+import { useAdmittedTimer } from '../useAdmittedTimer'
 
 type Props = {
   fox: InstanceSnapshot
@@ -14,6 +15,7 @@ type Props = {
 export default function InstanceTile({ fox, driveAll, onFocus, onGotoOne, onRestart }: Props) {
   const lastMove = useRef(0)
   const id = targetId(driveAll, fox.id)
+  const countdown = useAdmittedTimer(fox)
 
   return (
     <article className={`tile ${fox.status} ${fox.admittedFlash ? 'flash' : ''} ${driveAll ? 'herd' : ''}`}>
@@ -62,8 +64,12 @@ export default function InstanceTile({ fox, driveAll, onFocus, onGotoOne, onRest
       )}
       <div className="tile-overlay">
         <div>
-          <div style={{ fontWeight: 600 }}>Scout {fox.id}</div>
-          {statusDetail(fox) ? <div className="mono">{statusDetail(fox)}</div> : null}
+          <div style={{ fontWeight: 600 }}>
+            Scout {fox.id}
+            {fox.unhealthy ? <span className="badge-unhealthy" title="Scout may be stalled — will auto-restart">⚠</span> : null}
+          </div>
+          {countdown ? <div className="mono countdown">{countdown}</div> : null}
+          {!countdown && statusDetail(fox) ? <div className="mono">{statusDetail(fox)}</div> : null}
         </div>
         <div className="tile-actions">
           <StatusChip instance={fox} />

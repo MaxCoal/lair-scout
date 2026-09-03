@@ -45,7 +45,7 @@ export class ScoutManager {
   private windows = new Map<string, WindowState>()
   private muted = false
   private shuttingDown = false
-  private shipping: ShippingProfile = { name: '', address: '' }
+  private shipping: ShippingProfile = { name: '', address: '', phone: '' }
   private settings: AppSettings = emptySettings()
   private dockTimer: NodeJS.Timeout | null = null
   private interactTimer: NodeJS.Timeout | null = null
@@ -71,7 +71,7 @@ export class ScoutManager {
     this.armRamTimer()
     void loadSettings().then((settings) => {
       this.settings = settings
-      this.shipping = { name: settings.name, address: settings.address }
+      this.shipping = { name: settings.name, address: settings.address, phone: settings.phone }
       this.broadcastSettings()
       void this.pushProfile()
     })
@@ -89,7 +89,7 @@ export class ScoutManager {
 
   async saveProfile(settings: AppSettings): Promise<AppSettings> {
     this.settings = await saveSettings(settings)
-    this.shipping = { name: this.settings.name, address: this.settings.address }
+    this.shipping = { name: this.settings.name, address: this.settings.address, phone: this.settings.phone }
     this.broadcastSettings()
     await this.pushProfile()
     return this.settings
@@ -623,6 +623,14 @@ export class ScoutManager {
     if (message.type === 'event' && message.event === 'queuePopped') {
       const id = String(message.payload)
       this.emitAlert('instances:queuePopped', id, `Scout ${id}: queue started`)
+      return
+    }
+
+    if (message.type === 'event' && message.event === 'autoRestart') {
+      const id = String(message.payload)
+      if (this.windows.has(id)) {
+        void this.restart(id)
+      }
       return
     }
   }
