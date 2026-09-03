@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import type { InstanceSnapshot } from '@shared/types'
-import { StatusChip, statusLine } from './status'
+import { StatusChip, statusDetail } from './status'
 import { eventCoords, mouseButton, targetId } from '../input'
 
 type Props = {
@@ -102,11 +102,11 @@ export default function FocusView({ fox, driveAll, fleetCount, live, onBack, onR
               ? 'Click and type directly in this window'
               : driveAll
                 ? `Mirroring to ${fleetCount}`
-                : statusLine(fox)}
+                : statusDetail(fox) || fox.host}
           </div>
         </div>
         <div className="top-actions">
-          <StatusChip status={fox.status} />
+          <StatusChip instance={fox} />
           {fox.poppedOut ? (
             <button className="btn" type="button" onClick={() => window.lairscout.dock(fox.id)}>
               Dock

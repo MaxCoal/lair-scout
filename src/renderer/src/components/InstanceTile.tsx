@@ -1,6 +1,6 @@
 import { useRef } from 'react'
 import type { InstanceSnapshot } from '@shared/types'
-import { StatusChip, statusLine } from './status'
+import { StatusChip, statusDetail } from './status'
 import { eventCoords, mouseButton, targetId } from '../input'
 
 type Props = {
@@ -63,10 +63,10 @@ export default function InstanceTile({ fox, driveAll, onFocus, onGotoOne, onRest
       <div className="tile-overlay">
         <div>
           <div style={{ fontWeight: 600 }}>Scout {fox.id}</div>
-          <div className="mono">{statusLine(fox)}</div>
+          {statusDetail(fox) ? <div className="mono">{statusDetail(fox)}</div> : null}
         </div>
         <div className="tile-actions">
-          <StatusChip status={fox.status} />
+          <StatusChip instance={fox} />
           <button
             className="btn primary"
             type="button"

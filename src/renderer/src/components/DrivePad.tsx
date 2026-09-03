@@ -1,6 +1,6 @@
 import { useRef } from 'react'
 import type { InstanceSnapshot } from '@shared/types'
-import { StatusChip, statusLine } from './status'
+import { StatusChip } from './status'
 import { eventCoords, mouseButton } from '../input'
 
 type Props = {
@@ -22,10 +22,10 @@ export default function DrivePad({ fox, fleetCount, standalone = false }: Props)
         <div>
           <strong>Drive all · showing Scout {fox.id}</strong>
           <div className="mono">
-            Clicks, scroll, and keys go to {fleetCount} scout{fleetCount === 1 ? '' : 's'} · {statusLine(fox)}
+            Clicks, scroll, and keys go to {fleetCount} scout{fleetCount === 1 ? '' : 's'}
           </div>
         </div>
-        <StatusChip status={fox.status} />
+        <StatusChip instance={fox} />
       </div>
       <div
         className="focus-stage herd"

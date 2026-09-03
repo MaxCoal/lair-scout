@@ -10,12 +10,29 @@ const LABELS: Record<SessionStatus, string> = {
   error: 'Error'
 }
 
-export function StatusChip({ status }: { status: SessionStatus }) {
-  return <span className={`chip ${status}`}>{LABELS[status]}</span>
+// Worker labels that only restate the chip, so the detail line stays empty for them.
+const STATE_ONLY =
+  /^(idle|loading|starting…|not in queue|in queue(,.*)?|admitted(, waiting for queue)?|waiting for queue|waiting in queue…|error)$/i
+
+function compactWait(wait: string): string {
+  if (/more th[ae]n an hour/i.test(wait)) return '1 hr+'
+  return wait
 }
 
-export function statusLine(instance: InstanceSnapshot): string {
+export function statusText(instance: InstanceSnapshot): string {
+  const state = LABELS[instance.status] || 'Waiting'
+  if (instance.status === 'in_queue' && instance.waitTime) {
+    return `${state} · ${compactWait(instance.waitTime)}`
+  }
+  return state
+}
+
+export function statusDetail(instance: InstanceSnapshot): string {
   if (instance.error) return instance.error
-  if (instance.statusLabel) return instance.statusLabel
-  return LABELS[instance.status] || 'Waiting'
+  const label = instance.statusLabel?.trim() || ''
+  return STATE_ONLY.test(label) ? '' : label
+}
+
+export function StatusChip({ instance }: { instance: InstanceSnapshot }) {
+  return <span className={`chip ${instance.status}`}>{statusText(instance)}</span>
 }

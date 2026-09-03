@@ -578,12 +578,15 @@ input {
 
 .tile-actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 6px;
 }
 
 .chip {
   display: inline-flex;
   align-items: center;
+  white-space: nowrap;
   gap: 6px;
   border-radius: 999px;
   padding: 3px 8px;

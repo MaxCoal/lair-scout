@@ -1,5 +1,5 @@
 import type { InstanceSnapshot } from '@shared/types'
-import { StatusChip, statusLine } from './status'
+import { StatusChip, statusDetail } from './status'
 
 type Props = {
   instances: InstanceSnapshot[]
@@ -20,9 +20,9 @@ export default function Sidebar({ instances, focusedId, onFocus, onRestart, onKi
         <div key={fox.id} className={`fox-row ${focusedId === fox.id ? 'active' : ''}`}>
           <button type="button" onClick={() => onFocus(fox.id)} style={{ all: 'unset', cursor: 'pointer' }}>
             <div className="fox-row-title">Scout {fox.id}</div>
-            <div className="fox-row-meta">{statusLine(fox)}</div>
+            {statusDetail(fox) ? <div className="fox-row-meta">{statusDetail(fox)}</div> : null}
             <div style={{ marginTop: 8 }}>
-              <StatusChip status={fox.status} />
+              <StatusChip instance={fox} />
             </div>
           </button>
           <div className="fox-row-btns">
