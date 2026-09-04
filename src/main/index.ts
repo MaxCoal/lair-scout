@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { scoutManager } from './scoutManager'
-import type { AppSettings } from '@shared/types'
+import type { FullAutoArmInput, SettingsUpdate } from '@shared/types'
 
 let quitting = false
 let mainWindow: BrowserWindow | null = null
@@ -17,7 +17,7 @@ function appIcon(): string | undefined {
 function rendererPrefs() {
   return {
     preload: join(__dirname, '../preload/index.js'),
-    sandbox: false,
+    sandbox: true,
     contextIsolation: true,
     nodeIntegration: false
   }
@@ -135,7 +135,11 @@ function registerIpc(): void {
   ipcMain.handle('alerts:setMuted', (_event, muted: boolean) => scoutManager.setMuted(muted))
   ipcMain.handle('instances:setFocused', (_event, id: string | null) => scoutManager.setFocused(id))
   ipcMain.handle('settings:get', () => scoutManager.getSettings())
-  ipcMain.handle('settings:save', (_event, settings: AppSettings) => scoutManager.saveProfile(settings))
+  ipcMain.handle('settings:save', (_event, settings: SettingsUpdate) => scoutManager.saveProfile(settings))
+  ipcMain.handle('fullAuto:get', () => scoutManager.getFullAuto())
+  ipcMain.handle('fullAuto:arm', (_event, input: FullAutoArmInput) => scoutManager.armFullAuto(input))
+  ipcMain.handle('fullAuto:disarm', () => scoutManager.disarmFullAuto())
+  ipcMain.handle('scout:logs', () => scoutManager.getScoutLogs())
   ipcMain.handle('app:quit', async () => {
     const activeCount = scoutManager.activeCount()
     if (activeCount > 0) {

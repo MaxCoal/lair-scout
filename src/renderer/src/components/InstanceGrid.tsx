@@ -12,10 +12,10 @@ type Props = {
 export default function InstanceGrid({ instances, driveAll, onFocus, onGotoOne, onRestart }: Props) {
   return (
     <div className="grid">
-      {instances.map((fox) => (
+      {instances.map((scout) => (
         <InstanceTile
-          key={fox.id}
-          fox={fox}
+          key={scout.id}
+          instance={scout}
           driveAll={driveAll}
           onFocus={onFocus}
           onGotoOne={onGotoOne}

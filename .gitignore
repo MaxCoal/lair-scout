@@ -1,6 +1,8 @@
 node_modules
 out
 dist
+release
+resources/runtime
 *.tsbuildinfo
 .DS_Store
 *.log
@@ -8,4 +10,7 @@ dist
 .idea
 examples/
 settings.json
+card.vault.json
+click-dumps
+scout-logs
 

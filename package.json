@@ -8,7 +8,55 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "start": "electron-vite preview",
-    "postinstall": "playwright install chromium"
+    "typecheck": "tsc -b --pretty false",
+    "test": "vitest run",
+    "postinstall": "playwright install chromium",
+    "dist": "npm run build && node scripts/prepare-runtime.mjs && node scripts/pack-win.mjs nsis",
+    "dist:dir": "npm run build && node scripts/prepare-runtime.mjs && node scripts/pack-win.mjs dir"
+  },
+  "build": {
+    "appId": "com.lairscout.app",
+    "productName": "Lair Scout",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**/*",
+      "!node_modules/playwright/**",
+      "!node_modules/playwright-core/**"
+    ],
+    "asar": true,
+    "npmRebuild": false,
+    "extraResources": [
+      {
+        "from": "resources/runtime",
+        "to": "runtime",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "icon": "resources/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Lair Scout",
+      "uninstallDisplayName": "Lair Scout",
+      "artifactName": "LairScout-${version}-setup.${ext}"
+    }
   },
   "dependencies": {
     "@electron-toolkit/utils": "^4.0.0",
@@ -20,10 +68,12 @@
     "@types/react-dom": "^19.1.9",
     "@vitejs/plugin-react": "^5.0.2",
     "electron": "^38.0.0",
+    "electron-builder": "^26.15.3",
     "electron-vite": "^4.0.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "typescript": "^5.9.2",
-    "vite": "^7.1.5"
+    "vite": "^7.1.5",
+    "vitest": "^5.0.0"
   }
 }

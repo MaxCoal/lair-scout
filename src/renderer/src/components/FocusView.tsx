@@ -5,7 +5,7 @@ import { useAdmittedTimer } from '../useAdmittedTimer'
 import { eventCoords, mouseButton, targetId } from '../input'
 
 type Props = {
-  fox: InstanceSnapshot
+  instance: InstanceSnapshot
   driveAll: boolean
   fleetCount: number
   live: boolean
@@ -13,14 +13,14 @@ type Props = {
   onRestart: (id: string) => void
 }
 
-export default function FocusView({ fox, driveAll, fleetCount, live, onBack, onRestart }: Props) {
+export default function FocusView({ instance, driveAll, fleetCount, live, onBack, onRestart }: Props) {
   const stageRef = useRef<HTMLDivElement>(null)
   const lastMove = useRef(0)
-  const countdown = useAdmittedTimer(fox)
+  const countdown = useAdmittedTimer(instance)
 
   useEffect(() => {
     stageRef.current?.focus()
-  }, [fox.id])
+  }, [instance.id])
 
   useEffect(() => {
     if (!live) return undefined
@@ -48,7 +48,7 @@ export default function FocusView({ fox, driveAll, fleetCount, live, onBack, onR
       last.y = next.y
       last.width = next.width
       last.height = next.height
-      void window.lairscout.interact(fox.id, next)
+      void window.lairscout.interact(instance.id, next)
     }
     const schedule = (): void => {
       window.clearTimeout(timer)
@@ -62,22 +62,22 @@ export default function FocusView({ fox, driveAll, fleetCount, live, onBack, onR
       window.clearTimeout(timer)
       observer.disconnect()
       window.removeEventListener('resize', schedule)
-      void window.lairscout.stopInteract(fox.id)
+      void window.lairscout.stopInteract(instance.id)
     }
-  }, [fox.id, live])
+  }, [instance.id, live])
 
   useEffect(() => {
-    if (live || driveAll) return undefined
     const onKey = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') {
         onBack()
         return
       }
+      if (live || driveAll) return
       if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return
       if (event.type === 'keydown' && event.repeat) return
       event.preventDefault()
       void window.lairscout.key({
-        id: fox.id,
+        id: instance.id,
         key: event.key,
         type: event.type === 'keyup' ? 'up' : 'down'
       })
@@ -88,44 +88,44 @@ export default function FocusView({ fox, driveAll, fleetCount, live, onBack, onR
       window.removeEventListener('keydown', onKey)
       window.removeEventListener('keyup', onKey)
     }
-  }, [driveAll, fox.id, live, onBack])
+  }, [driveAll, instance.id, live, onBack])
 
-  const id = targetId(driveAll && !live, fox.id)
+  const id = targetId(driveAll && !live, instance.id)
 
   return (
     <div className="focus">
       <div className="focus-bar">
         <div>
           <strong>
-            {live ? `Live · Scout ${fox.id}` : driveAll ? `All scouts · showing Scout ${fox.id}` : `Scout ${fox.id}`}
+            {live ? `Live · Scout ${instance.id}` : driveAll ? `All scouts · showing Scout ${instance.id}` : `Scout ${instance.id}`}
           </strong>
           <div className="mono">
             {live
               ? 'Click and type directly in this window'
               : driveAll
                 ? `Mirroring to ${fleetCount}`
-                : countdown || statusDetail(fox) || fox.host}
+                : countdown || statusDetail(instance) || instance.host}
           </div>
         </div>
         <div className="top-actions">
-          <StatusChip instance={fox} />
-          {fox.poppedOut ? (
-            <button className="btn" type="button" onClick={() => window.lairscout.dock(fox.id)}>
+          <StatusChip instance={instance} />
+          {instance.poppedOut ? (
+            <button className="btn" type="button" onClick={() => window.lairscout.dock(instance.id)}>
               Dock
             </button>
           ) : (
-            <button className="btn" type="button" onClick={() => window.lairscout.popOut(fox.id)}>
+            <button className="btn" type="button" onClick={() => window.lairscout.popOut(instance.id)}>
               Pop out
             </button>
           )}
-          <button className="btn danger" type="button" onClick={() => window.lairscout.reload(fox.id)}>
+          <button className="btn danger" type="button" onClick={() => window.lairscout.reload(instance.id)}>
             Reload (may drop queue)
           </button>
           <button
             className="btn"
             type="button"
             title="New browser session (drops queue)"
-            onClick={() => onRestart(fox.id)}
+            onClick={() => onRestart(instance.id)}
           >
             Restart
           </button>
@@ -151,10 +151,10 @@ export default function FocusView({ fox, driveAll, fleetCount, live, onBack, onR
       >
         {live ? (
           <div className="placeholder">Live Chromium sits in this panel — click it directly.</div>
-        ) : fox.screenshot ? (
+        ) : instance.screenshot ? (
           <img
-            src={fox.screenshot}
-            alt={driveAll ? 'Fleet live view' : `Scout ${fox.id} live view`}
+            src={instance.screenshot}
+            alt={driveAll ? 'Fleet live view' : `Scout ${instance.id} live view`}
             onMouseMove={(event) => {
               const now = Date.now()
               if (now - lastMove.current < 32) return

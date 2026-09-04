@@ -5,24 +5,24 @@ import { eventCoords, mouseButton, targetId } from '../input'
 import { useAdmittedTimer } from '../useAdmittedTimer'
 
 type Props = {
-  fox: InstanceSnapshot
+  instance: InstanceSnapshot
   driveAll: boolean
   onFocus: (id: string) => void
   onGotoOne: (id: string) => void
   onRestart: (id: string) => void
 }
 
-export default function InstanceTile({ fox, driveAll, onFocus, onGotoOne, onRestart }: Props) {
+export default function InstanceTile({ instance, driveAll, onFocus, onGotoOne, onRestart }: Props) {
   const lastMove = useRef(0)
-  const id = targetId(driveAll, fox.id)
-  const countdown = useAdmittedTimer(fox)
+  const id = targetId(driveAll, instance.id)
+  const countdown = useAdmittedTimer(instance)
 
   return (
-    <article className={`tile ${fox.status} ${fox.admittedFlash ? 'flash' : ''} ${driveAll ? 'herd' : ''}`}>
-      {fox.screenshot ? (
+    <article className={`tile ${instance.status} ${instance.admittedFlash ? 'flash' : ''} ${driveAll ? 'herd' : ''}`}>
+      {instance.screenshot ? (
         <img
-          src={fox.screenshot}
-          alt={`Scout ${fox.id}`}
+          src={instance.screenshot}
+          alt={`Scout ${instance.id}`}
           onMouseMove={(event) => {
             if (!driveAll) return
             const now = Date.now()
@@ -51,34 +51,34 @@ export default function InstanceTile({ fox, driveAll, onFocus, onGotoOne, onRest
           }}
           onContextMenu={(event) => event.preventDefault()}
           onDoubleClick={() => {
-            if (!driveAll) onFocus(fox.id)
+            if (!driveAll) onFocus(instance.id)
           }}
           onClick={() => {
-            if (!driveAll) onFocus(fox.id)
+            if (!driveAll) onFocus(instance.id)
           }}
         />
       ) : (
-        <div className="placeholder" onClick={() => onFocus(fox.id)}>
+        <div className="placeholder" onClick={() => onFocus(instance.id)}>
           Starting Chromium…
         </div>
       )}
       <div className="tile-overlay">
         <div>
           <div style={{ fontWeight: 600 }}>
-            Scout {fox.id}
-            {fox.unhealthy ? <span className="badge-unhealthy" title="Scout may be stalled — will auto-restart">⚠</span> : null}
+            Scout {instance.id}
+            {instance.unhealthy ? <span className="badge-unhealthy" title="Scout may be stalled — will auto-restart">⚠</span> : null}
           </div>
           {countdown ? <div className="mono countdown">{countdown}</div> : null}
-          {!countdown && statusDetail(fox) ? <div className="mono">{statusDetail(fox)}</div> : null}
+          {!countdown && statusDetail(instance) ? <div className="mono">{statusDetail(instance)}</div> : null}
         </div>
         <div className="tile-actions">
-          <StatusChip instance={fox} />
+          <StatusChip instance={instance} />
           <button
             className="btn primary"
             type="button"
             onClick={(event) => {
               event.stopPropagation()
-              onFocus(fox.id)
+              onFocus(instance.id)
             }}
           >
             Interact
@@ -88,7 +88,7 @@ export default function InstanceTile({ fox, driveAll, onFocus, onGotoOne, onRest
             type="button"
             onClick={(event) => {
               event.stopPropagation()
-              onGotoOne(fox.id)
+              onGotoOne(instance.id)
             }}
           >
             Send
@@ -99,7 +99,7 @@ export default function InstanceTile({ fox, driveAll, onFocus, onGotoOne, onRest
             title="New browser session (drops queue)"
             onClick={(event) => {
               event.stopPropagation()
-              onRestart(fox.id)
+              onRestart(instance.id)
             }}
           >
             Restart

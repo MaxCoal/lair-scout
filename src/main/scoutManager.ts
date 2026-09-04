@@ -1,12 +1,21 @@
 import { BrowserWindow, Notification, app, screen } from 'electron'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { existsSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { join } from 'node:path'
-import type { AppSettings, InstanceSnapshot, RamSnapshot, ShippingProfile } from '@shared/types'
+import type { AppSettings, FullAutoArmInput, FullAutoStatus, InstanceSnapshot, RamSnapshot, SettingsUpdate, ShippingProfile } from '@shared/types'
+import { emptyShipping, normalizeShipping } from '@shared/shipping'
 import { findScoutWindow, hideScoutWindow, moveScoutWindow, placeScoutWindow, setClipChildren, showWindow, stopWin32Host } from './win32'
 import { readRam } from './memory'
 import { emptySettings, loadSettings, saveSettings } from './settings'
+import { emptyCard, loadCardVault, type CardSecrets } from './cardVault'
+import { FullAutoRunner } from './fullAuto'
+import { appendScoutLog, recentScoutLogs, scoutLogPath, setScoutDumpDir } from './scoutLog'
+import {
+  packagedRuntimeDir,
+  playwrightBrowsersPath,
+  resolveNodePath,
+  workerScriptPath
+} from './runtimePaths'
 
 const DEFAULT_COUNT = 2
 const MAX_FLEET = 20
@@ -23,14 +32,14 @@ type WindowState = {
 type StageRect = { x: number; y: number; width: number; height: number }
 
 type WorkerHandle = {
-  foxId: string
+  scoutId: string
   child: ChildProcessWithoutNullStreams
   ready: Promise<void>
   markReady: () => void
 }
 
 type Pending = {
-  foxId: string
+  scoutId: string
   resolve: (value: unknown) => void
   reject: (error: Error) => void
 }
@@ -45,8 +54,10 @@ export class ScoutManager {
   private windows = new Map<string, WindowState>()
   private muted = false
   private shuttingDown = false
-  private shipping: ShippingProfile = { name: '', address: '', phone: '' }
+  private shipping: ShippingProfile = emptyShipping()
   private settings: AppSettings = emptySettings()
+  private card: CardSecrets = emptyCard()
+  private fullAuto: FullAutoRunner
   private dockTimer: NodeJS.Timeout | null = null
   private interactTimer: NodeJS.Timeout | null = null
   private ramTimer: NodeJS.Timeout | null = null
@@ -57,11 +68,26 @@ export class ScoutManager {
   private strayDone: Promise<void>
   private markStrayDone: () => void = () => undefined
   private seenNotices = new Set<string>()
+  private seenNoticeKeys: string[] = []
 
   constructor() {
     this.strayDone = new Promise((resolve) => {
       this.markStrayDone = resolve
     })
+    this.fullAuto = new FullAutoRunner({
+      scaleTo: (count) => this.scaleTo(count),
+      workerIds: () => [...this.workers.keys()],
+      callOn: (id, cmd, payload, timeoutMs) => this.callOn(id, cmd, payload, timeoutMs),
+      fireOn: (id, cmd, payload) => this.fireOn(id, cmd, payload),
+      shipping: () => this.shipping,
+      card: () => this.card,
+      log: (step, detail, scoutId) => {
+        appendScoutLog({ step, detail, scoutId })
+      },
+      setDumpDir: (dir) => setScoutDumpDir(dir),
+      orderConfirmed: (id) => this.emitAlert('instances:orderConfirmed', id, `Scout ${id}: order confirmed`)
+    })
+    this.fullAuto.onStatus((status) => this.broadcastFullAuto(status))
   }
 
   attach(window: BrowserWindow): void {
@@ -69,9 +95,10 @@ export class ScoutManager {
     this.armDockTimer()
     this.armInteractTimer()
     this.armRamTimer()
-    void loadSettings().then((settings) => {
+    void loadSettings().then(async (settings) => {
       this.settings = settings
-      this.shipping = { name: settings.name, address: settings.address, phone: settings.phone }
+      this.shipping = normalizeShipping(settings)
+      this.card = await loadCardVault()
       this.broadcastSettings()
       void this.pushProfile()
     })
@@ -87,9 +114,26 @@ export class ScoutManager {
     return this.settings
   }
 
-  async saveProfile(settings: AppSettings): Promise<AppSettings> {
+  getFullAuto(): FullAutoStatus {
+    return this.fullAuto.status
+  }
+
+  getScoutLogs(): { path: string; lines: ReturnType<typeof recentScoutLogs> } {
+    return { path: scoutLogPath(), lines: recentScoutLogs() }
+  }
+
+  async armFullAuto(input: FullAutoArmInput): Promise<FullAutoStatus> {
+    return this.fullAuto.arm(input)
+  }
+
+  async disarmFullAuto(): Promise<FullAutoStatus> {
+    return this.fullAuto.disarm()
+  }
+
+  async saveProfile(settings: SettingsUpdate): Promise<AppSettings> {
     this.settings = await saveSettings(settings)
-    this.shipping = { name: this.settings.name, address: this.settings.address, phone: this.settings.phone }
+    this.shipping = normalizeShipping(this.settings)
+    this.card = await loadCardVault()
     this.broadcastSettings()
     await this.pushProfile()
     return this.settings
@@ -115,12 +159,17 @@ export class ScoutManager {
 
   activeCount(): number {
     return this.snapshots.filter(
-      (s) => s.status === 'in_queue' || s.status === 'waiting_for_queue' || s.status === 'admitted'
+      (s) =>
+        s.status === 'in_queue' ||
+        s.status === 'waiting_for_queue' ||
+        s.status === 'admitted' ||
+        s.status === 'purchasing' ||
+        s.status === 'hunting'
     ).length
   }
 
   async setFocused(id: string | null): Promise<void> {
-    this.forEachWorker((handle) => this.write(handle, { requestId: 0, cmd: 'setFocused', foxId: id }))
+    this.forEachWorker((handle) => this.write(handle, { requestId: 0, cmd: 'setFocused', scoutId: id }))
   }
 
   list(): InstanceSnapshot[] {
@@ -136,15 +185,16 @@ export class ScoutManager {
   }
 
   async restart(id: string): Promise<void> {
-    const snap = this.snapshots.find((fox) => fox.id === id)
+    const snap = this.snapshots.find((scout) => scout.id === id)
     const url = snap?.url && /^https?:/i.test(snap.url) ? snap.url : undefined
     const state = this.windows.get(id)
     if (state?.interacting) {
       state.interacting = false
-      this.fireOn(id, 'setPaused', { foxId: id, paused: false })
+      this.fireOn(id, 'setPaused', { scoutId: id, paused: false })
     }
     if (this.windows.has(id)) {
-      await this.callOn(id, 'kill', { foxId: id }).catch(() => undefined)
+      this.fullAuto.onScoutGone(id)
+      await this.callOn(id, 'kill', { scoutId: id }).catch(() => undefined)
       this.disposeWorker(id)
       this.windows.delete(id)
       this.rebuildSnapshots()
@@ -166,7 +216,7 @@ export class ScoutManager {
     this.windows.set(id, { hwnd: 0, pid: 0, profileDir, poppedOut: false, interacting: false })
     this.rebuildSnapshots()
     this.broadcast()
-    const result = (await this.callOn(id, 'spawn', { foxId: id, profileDir }, 120000)) as { pid?: number }
+    const result = (await this.callOn(id, 'spawn', { scoutId: id, profileDir }, 120000)) as { pid?: number }
     const state = this.windows.get(id)
     if (state && result?.pid) state.pid = result.pid
     if (state) {
@@ -178,6 +228,7 @@ export class ScoutManager {
       })
     }
     this.broadcast()
+    void this.fullAuto.onWorkerReady(id)
     return id
   }
 
@@ -193,7 +244,8 @@ export class ScoutManager {
   }
 
   async kill(id: string): Promise<void> {
-    await this.callOn(id, 'kill', { foxId: id }).catch(() => undefined)
+    this.fullAuto.onScoutGone(id)
+    await this.callOn(id, 'kill', { scoutId: id }).catch(() => undefined)
     this.disposeWorker(id)
     this.windows.delete(id)
     this.rebuildSnapshots()
@@ -202,7 +254,7 @@ export class ScoutManager {
 
   async gotoAll(url: string): Promise<void> {
     await Promise.allSettled(
-      [...this.workers.keys()].map((id) => this.callOn(id, 'goto', { foxId: id, url }))
+      [...this.workers.keys()].map((id) => this.callOn(id, 'goto', { scoutId: id, url }))
     )
   }
 
@@ -213,11 +265,11 @@ export class ScoutManager {
   }
 
   async gotoOne(id: string, url: string): Promise<void> {
-    await this.callOn(id, 'goto', { foxId: id, url })
+    await this.callOn(id, 'goto', { scoutId: id, url })
   }
 
   async reload(id: string): Promise<void> {
-    await this.callOn(id, 'reload', { foxId: id })
+    await this.callOn(id, 'reload', { scoutId: id })
   }
 
   click(
@@ -252,12 +304,12 @@ export class ScoutManager {
       if (moved) state.hwnd = moved
       return
     }
-    this.fireOn(id, 'setPaused', { foxId: id, paused: true })
+    this.fireOn(id, 'setPaused', { scoutId: id, paused: true })
     for (const [otherId, other] of this.windows) {
       if (otherId !== id && other.interacting) {
         other.interacting = false
         other.lastPhys = undefined
-        this.fireOn(otherId, 'setPaused', { foxId: otherId, paused: false })
+        this.fireOn(otherId, 'setPaused', { scoutId: otherId, paused: false })
         await hideScoutWindow({
           pid: other.pid,
           hwnd: other.hwnd,
@@ -285,7 +337,7 @@ export class ScoutManager {
       title: `LairScout-${id}`,
       owner: this.ownerHwnd()
     })
-    this.fireOn(id, 'setPaused', { foxId: id, paused: false })
+    this.fireOn(id, 'setPaused', { scoutId: id, paused: false })
     if (![...this.windows.values()].some((item) => item.interacting)) {
       await setClipChildren(this.ownerHwnd(), false)
     }
@@ -301,7 +353,7 @@ export class ScoutManager {
     if (hwnd) state.hwnd = hwnd
     if (state.hwnd) await showWindow(state.hwnd)
     state.poppedOut = true
-    this.fireOn(id, 'setPaused', { foxId: id, paused: true })
+    this.fireOn(id, 'setPaused', { scoutId: id, paused: true })
     if (![...this.windows.values()].some((item) => item.interacting)) {
       await setClipChildren(this.ownerHwnd(), false)
     }
@@ -320,7 +372,7 @@ export class ScoutManager {
       title: `LairScout-${id}`,
       owner: this.ownerHwnd()
     })
-    this.fireOn(id, 'setPaused', { foxId: id, paused: false })
+    this.fireOn(id, 'setPaused', { scoutId: id, paused: false })
     if (![...this.windows.values()].some((item) => item.interacting)) {
       await setClipChildren(this.ownerHwnd(), false)
     }
@@ -329,6 +381,7 @@ export class ScoutManager {
 
   async shutdown(): Promise<void> {
     this.shuttingDown = true
+    await this.fullAuto.shutdown()
     if (this.dockTimer) clearInterval(this.dockTimer)
     if (this.interactTimer) clearInterval(this.interactTimer)
     if (this.ramTimer) clearInterval(this.ramTimer)
@@ -467,14 +520,15 @@ export class ScoutManager {
     const existing = this.workers.get(id)
     if (existing) return existing
 
-    const workerPath =
-      !app.isPackaged && existsSync(join(process.cwd(), 'src/main/scoutWorker.cjs'))
-        ? join(process.cwd(), 'src/main/scoutWorker.cjs')
-        : join(__dirname, 'scoutWorker.cjs')
-    const nodePath = resolveNode()
+    const runtime = packagedRuntimeDir()
+    const workerPath = workerScriptPath()
+    const nodePath = resolveNodePath()
     const env = { ...process.env }
-    delete env.PLAYWRIGHT_BROWSERS_PATH
     delete env.ELECTRON_RUN_AS_NODE
+    const browsers = playwrightBrowsersPath()
+    if (browsers) env.PLAYWRIGHT_BROWSERS_PATH = browsers
+    else delete env.PLAYWRIGHT_BROWSERS_PATH
+    if (runtime) env.NODE_PATH = join(runtime, 'pw')
     if (killStray) env.LAIRSCOUT_KILL_STRAY = '1'
     else delete env.LAIRSCOUT_KILL_STRAY
 
@@ -491,13 +545,14 @@ export class ScoutManager {
     const child = spawn(nodePath, [workerPath], {
       stdio: ['pipe', 'pipe', 'pipe'],
       env,
+      cwd: runtime ?? process.cwd(),
       windowsHide: true
     })
-    const handle: WorkerHandle = { foxId: id, child, ready, markReady }
+    const handle: WorkerHandle = { scoutId: id, child, ready, markReady }
     this.workers.set(id, handle)
 
     child.stderr.on('data', (chunk) => {
-      console.error(`[stack-worker ${id}]`, String(chunk))
+      console.error(`[scout-worker ${id}]`, String(chunk))
     })
 
     const rl = createInterface({ input: child.stdout })
@@ -509,13 +564,14 @@ export class ScoutManager {
         this.markStrayDone()
       }
       for (const [requestId, pending] of this.pending) {
-        if (pending.foxId !== id) continue
+        if (pending.scoutId !== id) continue
         pending.reject(new Error(`Chromium worker exited (${code ?? 'unknown'})`))
         this.pending.delete(requestId)
       }
       if (this.workers.get(id) === handle) this.workers.delete(id)
       if (!this.shuttingDown && this.windows.has(id)) {
         console.error(`Chromium worker for Scout ${id} exited unexpectedly`, code)
+        this.fullAuto.onScoutGone(id)
       }
     })
     return handle
@@ -532,7 +588,7 @@ export class ScoutManager {
     }
   }
 
-  private onLine(foxId: string, line: string): void {
+  private onLine(scoutId: string, line: string): void {
     if (!line.trim()) return
     let message: {
       type: string
@@ -546,7 +602,7 @@ export class ScoutManager {
     try {
       message = JSON.parse(line)
     } catch {
-      console.error(`[stack-worker ${foxId}] bad line`, line)
+      console.error(`[stack-worker ${scoutId}] bad line`, line)
       return
     }
 
@@ -559,15 +615,27 @@ export class ScoutManager {
       return
     }
 
+    if (message.type === 'event' && message.event === 'scoutLog') {
+      const payload = (message.payload || {}) as { scoutId?: string; at?: number; step?: string; detail?: string; url?: string }
+      appendScoutLog({
+        scoutId: String(payload.scoutId || scoutId),
+        at: Number(payload.at) || Date.now(),
+        step: String(payload.step || 'note'),
+        detail: String(payload.detail || ''),
+        url: String(payload.url || '')
+      })
+      return
+    }
+
     if (message.type === 'event' && message.event === 'browserPid') {
-      const payload = message.payload as { foxId: string; pid: number }
-      const state = this.windows.get(String(payload.foxId))
+      const payload = message.payload as { scoutId: string; pid: number }
+      const state = this.windows.get(String(payload.scoutId))
       if (state) {
         state.pid = Number(payload.pid) || 0
         void hideScoutWindow({
           pid: state.pid,
           hwnd: state.hwnd,
-          title: `LairScout-${payload.foxId}`,
+          title: `LairScout-${payload.scoutId}`,
           owner: this.ownerHwnd()
         }).then((hwnd) => {
           if (hwnd) state.hwnd = hwnd
@@ -577,13 +645,13 @@ export class ScoutManager {
     }
 
     if (message.type === 'event' && message.event === 'ready') {
-      const handle = this.workers.get(foxId)
+      const handle = this.workers.get(scoutId)
       handle?.markReady()
       if (this.strayState === 'cleaning') {
         this.strayState = 'done'
         this.markStrayDone()
       }
-      void this.callOn(foxId, 'setProfile', { profile: this.shipping }).catch(() => undefined)
+      void this.callOn(scoutId, 'setProfile', { profile: this.shipping }).catch(() => undefined)
       return
     }
 
@@ -596,7 +664,7 @@ export class ScoutManager {
 
     if (message.type === 'event' && message.event === 'queueMessage') {
       const payload = message.payload as {
-        foxId?: string
+        scoutId?: string
         notice?: { id?: string; header?: string; time?: string; text?: string; kind?: 'message' | 'stock' }
       }
       const notice = payload?.notice
@@ -606,9 +674,14 @@ export class ScoutManager {
       const key = `${notice?.id || ''}|${kind}|${text}`
       if (this.seenNotices.has(key)) return
       this.seenNotices.add(key)
+      this.seenNoticeKeys.push(key)
+      if (this.seenNoticeKeys.length > 400) {
+        const drop = this.seenNoticeKeys.splice(0, 100)
+        for (const old of drop) this.seenNotices.delete(old)
+      }
       const title = kind === 'stock' ? 'Out of stock' : notice?.time ? `Queue message · ${notice.time}` : 'Queue message'
-      this.emitNotice('instances:queueMessage', String(payload.foxId || foxId), title, text, {
-        foxId: String(payload.foxId || foxId),
+      this.emitNotice('instances:queueMessage', String(payload.scoutId || scoutId), title, text, {
+        scoutId: String(payload.scoutId || scoutId),
         notice: {
           id: String(notice?.id || key),
           header: String(notice?.header || (kind === 'stock' ? 'Out of stock' : 'Message')),
@@ -617,12 +690,20 @@ export class ScoutManager {
           kind
         }
       })
+      if (kind === 'stock') void this.fullAuto.onSoldOut()
       return
     }
 
     if (message.type === 'event' && message.event === 'admitted') {
       const id = String(message.payload)
       this.emitAlert('instances:admitted', id, `Scout ${id} is through the queue`)
+      void this.fullAuto.onAdmitted(id)
+      return
+    }
+
+    if (message.type === 'event' && message.event === 'readyForPayment') {
+      const id = String(message.payload)
+      void this.fullAuto.onReadyForPayment(id)
       return
     }
 
@@ -641,13 +722,13 @@ export class ScoutManager {
     }
   }
 
-  private decorate(fox: InstanceSnapshot): InstanceSnapshot {
-    const win = this.windows.get(fox.id)
+  private decorate(scout: InstanceSnapshot): InstanceSnapshot {
+    const win = this.windows.get(scout.id)
     return {
-      ...fox,
-      statusLabel: fox.statusLabel || '',
-      poppedOut: win?.poppedOut ?? fox.poppedOut ?? false,
-      interacting: win?.interacting ?? fox.interacting ?? false
+      ...scout,
+      statusLabel: scout.statusLabel || '',
+      poppedOut: win?.poppedOut ?? scout.poppedOut ?? false,
+      interacting: win?.interacting ?? scout.interacting ?? false
     }
   }
 
@@ -666,9 +747,9 @@ export class ScoutManager {
   }
 
   private rebuildSnapshots(incoming?: InstanceSnapshot[]): void {
-    const byId = new Map(this.snapshots.map((fox) => [fox.id, fox]))
+    const byId = new Map(this.snapshots.map((scout) => [scout.id, scout]))
     if (incoming) {
-      for (const fox of incoming) byId.set(fox.id, this.decorate(fox))
+      for (const scout of incoming) byId.set(scout.id, this.decorate(scout))
     }
     this.snapshots = [...this.windows.keys()].map((id) => this.decorate(byId.get(id) ?? this.placeholder(id)))
   }
@@ -697,31 +778,31 @@ export class ScoutManager {
     }
   }
 
-  private forEachWorker(fn: (handle: WorkerHandle, foxId: string) => void): void {
-    for (const [foxId, handle] of this.workers) fn(handle, foxId)
+  private forEachWorker(fn: (handle: WorkerHandle, scoutId: string) => void): void {
+    for (const [scoutId, handle] of this.workers) fn(handle, scoutId)
   }
 
   private input(id: string, cmd: string, payload: Record<string, unknown>): void {
     if (id === '*') {
-      this.forEachWorker((handle, foxId) => this.write(handle, { requestId: 0, cmd, foxId, ...payload }))
+      this.forEachWorker((handle, scoutId) => this.write(handle, { requestId: 0, cmd, scoutId, ...payload }))
       return
     }
-    this.fireOn(id, cmd, { foxId: id, ...payload })
+    this.fireOn(id, cmd, { scoutId: id, ...payload })
   }
 
-  private fireOn(foxId: string, cmd: string, payload: Record<string, unknown>): void {
-    const handle = this.workers.get(foxId)
+  private fireOn(scoutId: string, cmd: string, payload: Record<string, unknown>): void {
+    const handle = this.workers.get(scoutId)
     if (!handle) return
     this.write(handle, { requestId: 0, cmd, ...payload })
   }
 
-  private callOn(foxId: string, cmd: string, payload: Record<string, unknown>, timeoutMs = 60000): Promise<unknown> {
-    const handle = this.workers.get(foxId)
-    if (!handle) return Promise.reject(new Error(`No worker for Scout ${foxId}`))
+  private callOn(scoutId: string, cmd: string, payload: Record<string, unknown>, timeoutMs = 60000): Promise<unknown> {
+    const handle = this.workers.get(scoutId)
+    if (!handle) return Promise.reject(new Error(`No worker for Scout ${scoutId}`))
     const requestId = this.nextRequest++
     return new Promise((resolve, reject) => {
-      this.pending.set(requestId, { foxId, resolve, reject })
-      this.write(handle, { requestId, cmd, foxId, ...payload })
+      this.pending.set(requestId, { scoutId, resolve, reject })
+      this.write(handle, { requestId, cmd, scoutId, ...payload })
       setTimeout(() => {
         if (this.pending.has(requestId)) {
           this.pending.delete(requestId)
@@ -741,15 +822,15 @@ export class ScoutManager {
       if (!win.isDestroyed()) win.webContents.send('instances:update', list)
     }
   }
+
+  private broadcastFullAuto(status: FullAutoStatus): void {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send('fullAuto:update', status)
+    }
+  }
 }
 
 export const scoutManager = new ScoutManager()
-
-function resolveNode(): string {
-  const fromNpm = process.env.npm_node_execpath
-  if (fromNpm && existsSync(fromNpm)) return fromNpm
-  return 'node'
-}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))

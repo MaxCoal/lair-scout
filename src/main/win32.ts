@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { createInterface } from 'node:readline'
-import { join } from 'node:path'
+import { win32HostPath } from './runtimePaths'
 
 export type Win32Opts = {
   action: 'find' | 'hide' | 'show' | 'place' | 'move' | 'clip'
@@ -69,7 +69,7 @@ class Win32Host {
   private ensure(): Promise<void> {
     if (this.ready) return this.ready
     this.ready = new Promise((resolve, reject) => {
-      const script = join(__dirname, 'win32-host.ps1')
+      const script = win32HostPath()
       const proc = spawn(
         'powershell.exe',
         ['-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File', script],

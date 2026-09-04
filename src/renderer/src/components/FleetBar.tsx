@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import type { RamSnapshot } from '@shared/types'
+import type { AppMode, RamSnapshot } from '@shared/types'
 import { instanceSortLabel, type InstanceSort } from '../sortInstances'
 import mark from '../assets/lair-scout-mark.png'
 
@@ -15,6 +15,8 @@ type Props = {
   ram: RamSnapshot | null
   muted: boolean
   driveAll: boolean
+  mode: AppMode
+  onMode: (mode: AppMode) => void
   onUrl: (value: string) => void
   onSendAll: (event: FormEvent) => void
   onRushCheckout: () => void
@@ -27,6 +29,7 @@ type Props = {
   instanceSort: InstanceSort
   onCycleInstanceSort: () => void
   onQuit: () => void
+  fleetLocked?: boolean
 }
 
 export default function FleetBar({
@@ -35,6 +38,8 @@ export default function FleetBar({
   ram,
   muted,
   driveAll,
+  mode,
+  onMode,
   onUrl,
   onSendAll,
   onRushCheckout,
@@ -46,7 +51,8 @@ export default function FleetBar({
   onOpenSettings,
   instanceSort,
   onCycleInstanceSort,
-  onQuit
+  onQuit,
+  fleetLocked = false
 }: Props) {
   const [draft, setDraft] = useState(String(count))
   const editing = useRef(false)
@@ -73,7 +79,24 @@ export default function FleetBar({
           <div className="brand-name">
             Lair<span>Scout</span>
           </div>
+          <div className="mode-toggle">
+            <button
+              className={`btn ghost ${mode === 'manual' ? 'active' : ''}`}
+              type="button"
+              onClick={() => onMode('manual')}
+            >
+              Manual
+            </button>
+            <button
+              className={`btn ghost ${mode === 'auto' ? 'active' : ''}`}
+              type="button"
+              onClick={() => onMode('auto')}
+            >
+              Full Auto
+            </button>
+          </div>
         </div>
+        {mode === 'manual' ? (
         <form className="nav-form" onSubmit={onSendAll}>
           <input
             value={url}
@@ -94,6 +117,11 @@ export default function FleetBar({
             {rushing ? 'Rushing…' : 'Cart & queue'}
           </button>
         </form>
+        ) : (
+          <div className="nav-form auto-mode-label">
+            <span className="hint">Full Auto — arm a named drop below. Cart & queue stays in Manual.</span>
+          </div>
+        )}
         <form
           className="stepper"
           onSubmit={(event) => {
@@ -101,7 +129,7 @@ export default function FleetBar({
             applyDraft()
           }}
         >
-          <button className="btn" type="button" onClick={() => onScaleTo(count - 1)} disabled={count === 0}>
+          <button className="btn" type="button" onClick={() => onScaleTo(count - 1)} disabled={fleetLocked || count === 0}>
             −
           </button>
           <input
@@ -109,14 +137,15 @@ export default function FleetBar({
             value={draft}
             inputMode="numeric"
             aria-label="Fleet size"
-            title="Type a count and press Enter"
+            title={fleetLocked ? 'Fleet size is locked while Full Auto is running' : 'Type a count and press Enter'}
+            disabled={fleetLocked}
             onFocus={() => {
               editing.current = true
             }}
             onChange={(event) => setDraft(event.target.value.replace(/[^\d]/g, ''))}
             onBlur={applyDraft}
           />
-          <button className="btn" type="button" onClick={() => onScaleTo(count + 1)}>
+          <button className="btn" type="button" onClick={() => onScaleTo(count + 1)} disabled={fleetLocked}>
             +
           </button>
         </form>

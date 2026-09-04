@@ -7,12 +7,16 @@ const LABELS: Record<SessionStatus, string> = {
   waiting_for_queue: 'Waiting for Queue',
   in_queue: 'In Queue',
   admitted: 'Admitted',
+  hunting: 'Hunting',
+  purchasing: 'Purchasing',
+  purchased: 'Purchased',
+  aborted: 'Aborted',
   error: 'Error'
 }
 
 // Worker labels that only restate the chip, so the detail line stays empty for them.
 const STATE_ONLY =
-  /^(idle|loading|starting…|not in queue|in queue(,.*)?|admitted(, waiting for queue)?|waiting for queue|waiting in queue…|error)$/i
+  /^(idle|loading|starting…|not in queue|in queue(,.*)?|admitted(, waiting for queue)?|waiting for queue|waiting in queue…|hunting…|purchasing…|purchased|aborted|error)$/i
 
 function compactWait(wait: string): string {
   if (/more th[ae]n an hour/i.test(wait)) return '1 hr+'

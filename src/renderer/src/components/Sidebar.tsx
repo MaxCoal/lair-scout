@@ -7,35 +7,43 @@ type Props = {
   onFocus: (id: string) => void
   onRestart: (id: string) => void
   onKill: (id: string) => void
+  actionsLocked?: boolean
 }
 
-export default function Sidebar({ instances, focusedId, onFocus, onRestart, onKill }: Props) {
+export default function Sidebar({ instances, focusedId, onFocus, onRestart, onKill, actionsLocked = false }: Props) {
   return (
     <aside className="sidebar">
       <div className="side-head">
         <span>Fleet</span>
         <span>{instances.length}</span>
       </div>
-      {instances.map((fox) => (
-        <div key={fox.id} className={`fox-row ${focusedId === fox.id ? 'active' : ''}`}>
-          <button type="button" onClick={() => onFocus(fox.id)} style={{ all: 'unset', cursor: 'pointer' }}>
-            <div className="fox-row-title">Scout {fox.id}</div>
-            {statusDetail(fox) ? <div className="fox-row-meta">{statusDetail(fox)}</div> : null}
+      {instances.map((scout) => (
+        <div key={scout.id} className={`scout-row ${focusedId === scout.id ? 'active' : ''}`}>
+          <button type="button" onClick={() => onFocus(scout.id)} style={{ all: 'unset', cursor: 'pointer' }}>
+            <div className="scout-row-title">Scout {scout.id}</div>
+            {statusDetail(scout) ? <div className="scout-row-meta">{statusDetail(scout)}</div> : null}
             <div style={{ marginTop: 8 }}>
-              <StatusChip instance={fox} />
+              <StatusChip instance={scout} />
             </div>
           </button>
-          <div className="fox-row-btns">
+          <div className="scout-row-btns">
             <button
               className="icon-btn"
               type="button"
-              title={`Restart Scout ${fox.id}`}
-              aria-label={`Restart Scout ${fox.id}`}
-              onClick={() => onRestart(fox.id)}
+              title={`Restart Scout ${scout.id}`}
+              aria-label={`Restart Scout ${scout.id}`}
+              disabled={actionsLocked}
+              onClick={() => onRestart(scout.id)}
             >
               ↻
             </button>
-            <button className="icon-btn" type="button" onClick={() => onKill(fox.id)} aria-label={`Kill Scout ${fox.id}`}>
+            <button
+              className="icon-btn"
+              type="button"
+              onClick={() => onKill(scout.id)}
+              aria-label={`Kill Scout ${scout.id}`}
+              disabled={actionsLocked}
+            >
               ×
             </button>
           </div>
