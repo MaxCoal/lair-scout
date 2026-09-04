@@ -1,7 +1,8 @@
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { app, BrowserWindow } from 'electron'
+import { BrowserWindow } from 'electron'
 import type { ScoutLogEntry } from '@shared/types'
+import { dataRoot } from './runtimePaths'
 
 const MAX_MEMORY = 160
 const memory: ScoutLogEntry[] = []
@@ -12,8 +13,7 @@ export function setScoutDumpDir(dir: string): void {
 }
 
 export function scoutLogDir(): string {
-  const root = app.isPackaged ? app.getPath('userData') : process.cwd()
-  return join(root, 'scout-logs')
+  return join(dataRoot(), 'scout-logs')
 }
 
 export function scoutLogPath(): string {

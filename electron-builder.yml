@@ -1,0 +1,31 @@
+appId: com.lairscout.app
+productName: Lair Scout
+directories:
+  output: release
+files:
+  - out/**/*
+  - '!out/tsc/**'
+  - '!node_modules/playwright/**'
+  - '!node_modules/playwright-core/**'
+asar: true
+npmRebuild: false
+extraResources:
+  - from: resources/runtime
+    to: runtime
+    filter:
+      - '**/*'
+win:
+  icon: resources/icon.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Lair Scout
+  uninstallDisplayName: Lair Scout
+  artifactName: LairScout-${version}-setup.${ext}

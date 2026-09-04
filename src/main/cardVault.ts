@@ -1,7 +1,8 @@
 import { existsSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { app, safeStorage } from 'electron'
+import { safeStorage } from 'electron'
+import { dataRoot } from './runtimePaths'
 
 export type CardSecrets = {
   holderName: string
@@ -25,8 +26,7 @@ export function emptyCard(): CardSecrets {
 }
 
 export function vaultPath(): string {
-  const root = app.isPackaged ? app.getPath('userData') : process.cwd()
-  return join(root, 'card.vault.json')
+  return join(dataRoot(), 'card.vault.json')
 }
 
 function encrypt(value: string): string {

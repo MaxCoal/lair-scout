@@ -14,50 +14,6 @@
     "dist": "npm run build && node scripts/prepare-runtime.mjs && node scripts/pack-win.mjs nsis",
     "dist:dir": "npm run build && node scripts/prepare-runtime.mjs && node scripts/pack-win.mjs dir"
   },
-  "build": {
-    "appId": "com.lairscout.app",
-    "productName": "Lair Scout",
-    "directories": {
-      "output": "release"
-    },
-    "files": [
-      "out/**/*",
-      "!node_modules/playwright/**",
-      "!node_modules/playwright-core/**"
-    ],
-    "asar": true,
-    "npmRebuild": false,
-    "extraResources": [
-      {
-        "from": "resources/runtime",
-        "to": "runtime",
-        "filter": [
-          "**/*"
-        ]
-      }
-    ],
-    "win": {
-      "icon": "resources/icon.ico",
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        }
-      ]
-    },
-    "nsis": {
-      "oneClick": false,
-      "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "shortcutName": "Lair Scout",
-      "uninstallDisplayName": "Lair Scout",
-      "artifactName": "LairScout-${version}-setup.${ext}"
-    }
-  },
   "dependencies": {
     "@electron-toolkit/utils": "^4.0.0",
     "playwright": "^1.55.0"

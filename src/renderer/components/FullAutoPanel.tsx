@@ -319,7 +319,7 @@ export default function FullAutoPanel({ fleetSize, status }: Props) {
                     return `${time}  ${who}  ${entry.step}${entry.detail ? `  ${entry.detail}` : ''}`
                   })
                   .join('\n')
-              : `Actions show up here when you Arm. Same lines are written to ${logPath || 'scout-logs/actions.log'}.`}
+              : `Actions show up here when you Arm. Same lines are written to ${logPath || 'data/scout-logs/actions.log'}.`}
             <div ref={logEnd} />
           </pre>
         ) : null}

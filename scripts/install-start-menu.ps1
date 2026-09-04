@@ -1,8 +1,8 @@
-# Creates Start Menu and Desktop shortcuts for Lair Scout.
+# Creates Start Menu and Desktop shortcuts for Lair Scout (source checkout).
 $ErrorActionPreference = 'Stop'
-$root = Split-Path -Parent $MyInvocation.MyCommand.Path
-$launcher = Join-Path $root 'start-lair-scout.cmd'
-$icon = Join-Path $root 'resources\icon.ico'
+$repo = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$launcher = Join-Path $repo 'Start.cmd'
+$icon = Join-Path $repo 'resources\icon.ico'
 $programs = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
 $desktop = [Environment]::GetFolderPath('Desktop')
 
@@ -16,7 +16,7 @@ function Write-Shortcut([string]$path) {
   $shell = New-Object -ComObject WScript.Shell
   $shortcut = $shell.CreateShortcut($path)
   $shortcut.TargetPath = $launcher
-  $shortcut.WorkingDirectory = $root
+  $shortcut.WorkingDirectory = $repo
   $shortcut.WindowStyle = 1
   $shortcut.Description = 'Launch Lair Scout'
   if (Test-Path $icon) {
@@ -29,4 +29,4 @@ function Write-Shortcut([string]$path) {
 Write-Host 'Shortcuts created:'
 Write-Shortcut (Join-Path $programs 'Lair Scout.lnk')
 Write-Shortcut (Join-Path $desktop 'Lair Scout.lnk')
-Write-Host 'Search Start for Lair Scout, or run start-lair-scout.cmd in this folder.'
+Write-Host 'Search Start for Lair Scout, or run Start.cmd in the repo folder.'

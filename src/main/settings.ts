@@ -1,10 +1,10 @@
 import { existsSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { app } from 'electron'
 import type { AppSettings, SettingsUpdate, ThemeId } from '@shared/types'
 import { emptyShipping, normalizeShipping } from '@shared/shipping'
-import { emptyCard, loadCardVault, looksMasked, saveCardVault, type CardSecrets } from './cardVault'
+import { loadCardVault, looksMasked, saveCardVault, type CardSecrets } from './cardVault'
+import { dataRoot } from './runtimePaths'
 
 export function emptySettings(): AppSettings {
   return {
@@ -23,8 +23,7 @@ function parseTheme(value: unknown): ThemeId {
 }
 
 export function settingsPath(): string {
-  const root = app.isPackaged ? app.getPath('userData') : process.cwd()
-  return join(root, 'settings.json')
+  return join(dataRoot(), 'settings.json')
 }
 
 function publicSettings(

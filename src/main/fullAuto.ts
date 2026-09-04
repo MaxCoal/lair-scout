@@ -1,9 +1,10 @@
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { app, powerSaveBlocker } from 'electron'
+import { powerSaveBlocker } from 'electron'
 import type { FoilHint, FullAutoArmInput, FullAutoStatus, ProductCandidate, ShippingProfile } from '@shared/types'
 import { shippingReady } from '@shared/shipping'
 import type { CardSecrets } from './cardVault'
+import { dataRoot } from './runtimePaths'
 import { needsAiPick, pickLocalMatch, pickWithLlm, productIdFromUrl, scoreHits, type ProductHit } from './productMatch'
 
 export const HOME_URL = 'https://secretlair.wizards.com/us'
@@ -540,9 +541,8 @@ function sleep(ms: number): Promise<void> {
 }
 
 function makeDumpDir(): string {
-  const root = app.isPackaged ? app.getPath('userData') : process.cwd()
   const stamp = new Date().toISOString().replace(/[:.]/g, '-')
-  const dir = join(root, 'click-dumps', stamp)
+  const dir = join(dataRoot(), 'click-dumps', stamp)
   mkdirSync(dir, { recursive: true })
   return dir
 }

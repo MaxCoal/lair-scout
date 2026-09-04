@@ -1,4 +1,4 @@
-# <img src="src/renderer/src/assets/lair-scout-mark.png" width="48" height="48" alt=""> Lair Scout
+# <img src="src/renderer/assets/lair-scout-mark.png" width="48" height="48" alt=""> Lair Scout
 
 Lair Scout is a Windows desktop app for running and monitoring isolated Chromium sessions during [Secret Lair](https://secretlair.wizards.com) drops.
 
@@ -36,7 +36,7 @@ npm install
 
 This installs dependencies and Playwright’s Chromium build.
 
-Start the app with `Start.cmd` or `start-lair-scout.cmd` (same launcher), or:
+Start the app with `Start.cmd`, or:
 
 ```bash
 npm run dev
@@ -45,7 +45,7 @@ npm run dev
 To add Start Menu and Desktop shortcuts when running from source:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\install-start-menu.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\install-start-menu.ps1
 ```
 
 Quit from the app’s quit control, or close the terminal that launched it.
@@ -61,7 +61,7 @@ Quit from the app’s quit control, or close the terminal that launched it.
 
 ### Settings and payment
 
-Checkout name, address, and card number/expiry are saved under **Settings**. They stay on this machine (`settings.json` and encrypted `card.vault.json` in the project directory when running from source, or Electron user data when packaged). CVV is never written to disk — enter it only when you Arm Full Auto.
+Checkout name, address, and card number/expiry are saved under **Settings**. They stay on this machine (`data/settings.json` and encrypted `data/card.vault.json` when running from source, or Electron user data when packaged). CVV is never written to disk — enter it only when you Arm Full Auto.
 
 **Use test card** fills empty shipping fields and stores Stripe’s `4242` test PAN. If a real card is already saved, you must confirm before it is replaced. **Clear saved card** wipes the vaulted PAN and expiry.
 
@@ -71,7 +71,7 @@ Switch to Full Auto, enter the product name, go-live time, fleet size, max order
 
 Checkout fill/place is retried a few times per scout, then that scout gives up so the rest of the fleet can still claim slots.
 
-Optional **Save page HTML** writes cart/shipping dumps under `click-dumps/` for debugging. Payment pages and iframes are not dumped.
+Optional **Save page HTML** writes cart/shipping dumps under `data/click-dumps/` for debugging. Payment pages and iframes are not dumped.
 
 An optional OpenAI key in Settings is used only when two product listings look too similar to pick locally.
 

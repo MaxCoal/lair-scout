@@ -1,6 +1,13 @@
 import { app } from 'electron'
-import { existsSync } from 'node:fs'
+import { existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
+
+export function dataRoot(): string {
+  if (app.isPackaged) return app.getPath('userData')
+  const dir = join(process.cwd(), 'data')
+  mkdirSync(dir, { recursive: true })
+  return dir
+}
 
 export function packagedRuntimeDir(): string | undefined {
   if (!app.isPackaged) return undefined
