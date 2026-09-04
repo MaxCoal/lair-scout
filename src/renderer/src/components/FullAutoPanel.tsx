@@ -291,8 +291,8 @@ export default function FullAutoPanel({ fleetSize, status }: Props) {
         </div>
       ) : null}
       <p className="auto-note">
-        Keep this PC awake. Scouts warm up before go-live, then search the store for the name. Remaining scouts abort
-        only after max orders confirm.
+        Sleep is blocked while armed. Scouts warm up before go-live, then search the store for the name. Remaining
+        scouts abort only after max orders confirm.
         {status.dumpDir ? ` Page dumps: ${status.dumpDir}` : ''}
       </p>
       <div className="auto-log">
@@ -315,7 +315,7 @@ export default function FullAutoPanel({ fleetSize, status }: Props) {
                   .slice(-80)
                   .map((entry) => {
                     const time = new Date(entry.at).toLocaleTimeString()
-                    const who = entry.foxId ? `S${entry.foxId}` : 'auto'
+                    const who = entry.scoutId ? `S${entry.scoutId}` : 'auto'
                     return `${time}  ${who}  ${entry.step}${entry.detail ? `  ${entry.detail}` : ''}`
                   })
                   .join('\n')

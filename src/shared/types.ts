@@ -97,7 +97,7 @@ export type ShippingProfile = {
 
 export type ScoutLogEntry = {
   at: number
-  foxId: string
+  scoutId: string
   step: string
   detail: string
   url: string
@@ -208,10 +208,11 @@ export type LairScoutAPI = {
   onUpdate: (cb: (instances: InstanceSnapshot[]) => void) => () => void
   onAdmitted: (cb: (id: string) => void) => () => void
   onQueuePopped: (cb: (id: string) => void) => () => void
-  onQueueMessage: (cb: (payload: { foxId: string; notice: QueueNotice }) => void) => () => void
+  onQueueMessage: (cb: (payload: { scoutId: string; notice: QueueNotice }) => void) => () => void
   onRam: (cb: (ram: RamSnapshot) => void) => () => void
   onSettings: (cb: (settings: AppSettings) => void) => () => void
   onFullAuto: (cb: (status: FullAutoStatus) => void) => () => void
   onScoutLog: (cb: (entry: ScoutLogEntry) => void) => () => void
+  onOrderConfirmed: (cb: (id: string) => void) => () => void
   quit: () => Promise<void>
 }

@@ -6,10 +6,29 @@ Each session is a separate browser profile. The dashboard shows live previews, q
 
 ## Requirements
 
-- Windows 10 or later
-- [Node.js](https://nodejs.org/) 20+
+- Windows 10 or later (x64)
+- For development from source: [Node.js](https://nodejs.org/) 20+
+
+Installed copies from the Windows setup do not need Node.js. Chromium is bundled.
 
 ## Install
+
+### Windows installer
+
+From a source checkout with Node installed:
+
+```bash
+npm install
+npm run dist
+```
+
+That writes `release/LairScout-<version>-setup.exe`. Run the setup to add Start Menu and Desktop shortcuts. Settings, the card vault, scout profiles, and debug dumps live under `%APPDATA%\lair-scout`.
+
+Windows SmartScreen may warn on an unsigned build; choose **More info** → **Run anyway** if you built it yourself.
+
+Unpacked output for local checks: `npm run dist:dir`.
+
+### From source
 
 ```bash
 npm install
@@ -17,13 +36,13 @@ npm install
 
 This installs dependencies and Playwright’s Chromium build.
 
-Start the app with `start-lair-scout.cmd` or:
+Start the app with `Start.cmd` or `start-lair-scout.cmd` (same launcher), or:
 
 ```bash
 npm run dev
 ```
 
-To add Start Menu and Desktop shortcuts:
+To add Start Menu and Desktop shortcuts when running from source:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install-start-menu.ps1
@@ -55,6 +74,8 @@ Checkout fill/place is retried a few times per scout, then that scout gives up s
 Optional **Save page HTML** writes cart/shipping dumps under `click-dumps/` for debugging. Payment pages and iframes are not dumped.
 
 An optional OpenAI key in Settings is used only when two product listings look too similar to pick locally.
+
+While Full Auto is armed, Windows sleep is blocked, fleet size/kill is locked, and a lounge sold-out message aborts idle scouts (in-flight checkouts keep going). An order confirmation plays an alert.
 
 ## Notes
 

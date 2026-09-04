@@ -74,7 +74,7 @@ const api: LairScoutAPI = {
   onQueueMessage: (cb) => {
     const listener = (
       _event: unknown,
-      payload: { foxId: string; notice: QueueNotice }
+      payload: { scoutId: string; notice: QueueNotice }
     ): void => cb(payload)
     ipcRenderer.on('instances:queueMessage', listener)
     return () => {
@@ -107,6 +107,13 @@ const api: LairScoutAPI = {
     ipcRenderer.on('scout:log', listener)
     return () => {
       ipcRenderer.removeListener('scout:log', listener)
+    }
+  },
+  onOrderConfirmed: (cb) => {
+    const listener = (_event: unknown, id: string): void => cb(id)
+    ipcRenderer.on('instances:orderConfirmed', listener)
+    return () => {
+      ipcRenderer.removeListener('instances:orderConfirmed', listener)
     }
   },
   quit: () => ipcRenderer.invoke('app:quit')

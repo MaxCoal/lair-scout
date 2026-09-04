@@ -1,6 +1,5 @@
 'use strict'
 
-delete process.env.PLAYWRIGHT_BROWSERS_PATH
 delete process.env.ELECTRON_RUN_AS_NODE
 
 const { chromium } = require('playwright')
@@ -67,10 +66,10 @@ function send(message) {
   process.stdout.write(`${JSON.stringify(message)}\n`)
 }
 
-function trace(fox, step, detail) {
+function trace(scout, step, detail) {
   let url = ''
   try {
-    url = (fox && pageOf(fox) && pageOf(fox).url()) || ''
+    url = (scout && pageOf(scout) && pageOf(scout).url()) || ''
   } catch {
     url = ''
   }
@@ -78,7 +77,7 @@ function trace(fox, step, detail) {
     type: 'event',
     event: 'scoutLog',
     payload: {
-      foxId: fox && fox.id ? String(fox.id) : '',
+      scoutId: scout && scout.id ? String(scout.id) : '',
       at: Date.now(),
       step: String(step || ''),
       detail: detail == null ? '' : String(detail),
@@ -483,23 +482,23 @@ async function inspectPage(page, previous, wasInQueue) {
   }
 }
 
-function pageOf(fox) {
-  const open = fox.context.pages().filter((page) => !page.isClosed())
-  const page = open.at(-1) ?? fox.page
-  fox.page = page
+function pageOf(scout) {
+  const open = scout.context.pages().filter((page) => !page.isClosed())
+  const page = open.at(-1) ?? scout.page
+  scout.page = page
   return page.isClosed() ? null : page
 }
 
-function targets(foxId) {
-  if (foxId === '*') return [...instances.values()]
-  const fox = instances.get(foxId)
-  return fox ? [fox] : []
+function targets(scoutId) {
+  if (scoutId === '*') return [...instances.values()]
+  const scout = instances.get(scoutId)
+  return scout ? [scout] : []
 }
 
-async function onPages(foxId, fn) {
+async function onPages(scoutId, fn) {
   await Promise.allSettled(
-    targets(foxId).map(async (fox) => {
-      const page = pageOf(fox)
+    targets(scoutId).map(async (scout) => {
+      const page = pageOf(scout)
       if (page) await fn(page)
     })
   )
@@ -508,28 +507,28 @@ async function onPages(foxId, fn) {
 const STALE_MS = 45000        // mark unhealthy if no screenshot update for this long
 const AUTO_RESTART_MS = 90000 // auto-restart a scout that has been unhealthy this long
 
-function snapshot(fox) {
+function snapshot(scout) {
   const now = Date.now()
   const unhealthy =
-    !isHeldStatus(fox.status) &&
-    (fox.status === 'error' ||
-      (fox.lastShotAt > 0 && now - fox.lastShotAt > STALE_MS && fox.status !== 'idle' && !fox.navigating))
+    !isHeldStatus(scout.status) &&
+    (scout.status === 'error' ||
+      (scout.lastShotAt > 0 && now - scout.lastShotAt > STALE_MS && scout.status !== 'idle' && !scout.navigating))
   return {
-    id: fox.id,
-    url: fox.url,
-    host: fox.host,
-    title: fox.title,
-    status: fox.status,
-    statusLabel: fox.statusLabel || statusLabel(fox.status, fox.waitTime),
-    waitTime: fox.waitTime,
-    queueNumber: fox.queueNumber,
-    queueNotice: fox.queueNotice,
-    screenshot: fox.screenshot,
-    error: fox.error,
-    admittedFlash: now < fox.admittedFlashUntil,
-    admittedAt: fox.admittedAt || undefined,
+    id: scout.id,
+    url: scout.url,
+    host: scout.host,
+    title: scout.title,
+    status: scout.status,
+    statusLabel: scout.statusLabel || statusLabel(scout.status, scout.waitTime),
+    waitTime: scout.waitTime,
+    queueNumber: scout.queueNumber,
+    queueNotice: scout.queueNotice,
+    screenshot: scout.screenshot,
+    error: scout.error,
+    admittedFlash: now < scout.admittedFlashUntil,
+    admittedAt: scout.admittedAt || undefined,
     unhealthy,
-    focused: focusedId === fox.id
+    focused: focusedId === scout.id
   }
 }
 
@@ -785,31 +784,31 @@ function fillProfileInPage(data) {
   return filled
 }
 
-async function applyShippingToFox(fox) {
-  const page = pageOf(fox)
+async function applyShippingToScout(scout) {
+  const page = pageOf(scout)
   if (!page || (!shippingProfile.name && !shippingProfile.address && !shippingProfile.address1 && !shippingProfile.email)) return
   await evaluateAllFrames(page, fillProfileInPage, parseAddress(shippingProfile))
 }
 
-function hookProfile(fox) {
-  if (fox.profileHooked) return
-  fox.profileHooked = true
+function hookProfile(scout) {
+  if (scout.profileHooked) return
+  scout.profileHooked = true
   const attach = (page) => {
     page.on('domcontentloaded', () => {
-      void applyShippingToFox(fox)
+      void applyShippingToScout(scout)
     })
     page.on('framenavigated', (frame) => {
-      if (frame === page.mainFrame()) void applyShippingToFox(fox)
+      if (frame === page.mainFrame()) void applyShippingToScout(scout)
     })
   }
-  for (const page of fox.context.pages()) attach(page)
-  fox.context.on('page', (page) => {
-    fox.page = page
+  for (const page of scout.context.pages()) attach(page)
+  scout.context.on('page', (page) => {
+    scout.page = page
     attach(page)
   })
 }
 
-async function spawnFox(foxId, profileDir) {
+async function spawnScout(scoutId, profileDir) {
   spawning = true
   try {
     await prepareProfile(profileDir)
@@ -846,11 +845,11 @@ async function spawnFox(foxId, profileDir) {
       ]
     })
     const pid = getBrowserPid(context)
-    send({ type: 'event', event: 'browserPid', payload: { foxId, pid, profileDir } })
+    send({ type: 'event', event: 'browserPid', payload: { scoutId, pid, profileDir } })
     const page = context.pages()[0] ?? (await context.newPage())
     await page.setViewportSize(VIEWPORT)
-    const fox = {
-      id: foxId,
+    const scout = {
+      id: scoutId,
       profileDir,
       context,
       page,
@@ -859,63 +858,63 @@ async function spawnFox(foxId, profileDir) {
       wasInQueue: false,
       url: page.url(),
       host: '',
-      title: `Scout ${foxId}`,
+      title: `Scout ${scoutId}`,
       admittedFlashUntil: 0,
       admittedAt: 0,
       lastShotAt: 0,
       navigating: false
     }
     context.on('page', (newPage) => {
-      fox.page = newPage
+      scout.page = newPage
     })
     page.on('crash', () => {
-      fox.status = 'error'
-      fox.error = 'Page crashed'
+      scout.status = 'error'
+      scout.error = 'Page crashed'
       emitUpdate()
     })
-    instances.set(foxId, fox)
-    hookProfile(fox)
-    await applyShippingToFox(fox)
+    instances.set(scoutId, scout)
+    hookProfile(scout)
+    await applyShippingToScout(scout)
     emitUpdate()
     await page.goto(
-      `data:text/html,<html><head><title>LairScout-${foxId}</title></head><body style="margin:0;background:#100c0a;color:#f4ead8;font-family:Segoe UI,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh"><div style="text-align:center"><div style="letter-spacing:.2em;text-transform:uppercase;color:#e8943a">Lair Scout</div><h1>Scout ${foxId}</h1><p style="color:#a89278">Ready. Use Send all to navigate.</p></div></body></html>`,
+      `data:text/html,<html><head><title>LairScout-${scoutId}</title></head><body style="margin:0;background:#100c0a;color:#f4ead8;font-family:Segoe UI,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh"><div style="text-align:center"><div style="letter-spacing:.2em;text-transform:uppercase;color:#e8943a">Lair Scout</div><h1>Scout ${scoutId}</h1><p style="color:#a89278">Ready. Use Send all to navigate.</p></div></body></html>`,
       { waitUntil: 'domcontentloaded' }
     )
-    fox.url = page.url()
-    fox.title = await page.title().catch(() => fox.title)
+    scout.url = page.url()
+    scout.title = await page.title().catch(() => scout.title)
     emitUpdate()
-    return { foxId, pid }
+    return { scoutId, pid }
   } finally {
     spawning = false
   }
 }
 
-async function killFox(foxId) {
-  const fox = instances.get(foxId)
-  if (!fox) return
-  instances.delete(foxId)
+async function killScout(scoutId) {
+  const scout = instances.get(scoutId)
+  if (!scout) return
+  instances.delete(scoutId)
   try {
-    await fox.context.close()
+    await scout.context.close()
   } catch {
     /* closed */
   }
-  await rm(fox.profileDir, { recursive: true, force: true }).catch(() => undefined)
+  await rm(scout.profileDir, { recursive: true, force: true }).catch(() => undefined)
   emitUpdate()
 }
 
-async function navigate(fox, url) {
-  fox.navigating = true
-  fox.status = 'loading'
-  fox.statusLabel = 'Loading'
-  fox.error = undefined
+async function navigate(scout, url) {
+  scout.navigating = true
+  scout.status = 'loading'
+  scout.statusLabel = 'Loading'
+  scout.error = undefined
   emitUpdate()
   try {
-    await fox.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 })
+    await scout.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 })
   } catch (error) {
-    fox.status = 'error'
-    fox.error = error instanceof Error ? error.message : 'Navigation failed'
+    scout.status = 'error'
+    scout.error = error instanceof Error ? error.message : 'Navigation failed'
   } finally {
-    fox.navigating = false
+    scout.navigating = false
   }
 }
 
@@ -923,67 +922,67 @@ function isHeldStatus(status) {
   return status === 'hunting' || status === 'purchasing' || status === 'purchased' || status === 'aborted'
 }
 
-async function inspectFox(fox) {
-  const page = pageOf(fox)
+async function inspectScout(scout) {
+  const page = pageOf(scout)
   if (!page) {
-    fox.status = 'error'
-    fox.error = 'No page'
-    fox.statusLabel = 'Error'
+    scout.status = 'error'
+    scout.error = 'No page'
+    scout.statusLabel = 'Error'
     return
   }
   try {
-    const previous = fox.status
-    const read = await inspectPage(page, previous, fox.wasInQueue)
-    if (read.status === 'in_queue' || read.status === 'waiting_for_queue') fox.wasInQueue = true
-    fox.navigating = false
-    fox.url = read.url
-    fox.host = read.host
-    fox.title = read.title
-    if (isHeldStatus(fox.status)) {
-      if (fox.status === 'hunting') fox.statusLabel = fox.statusLabel || 'Hunting…'
+    const previous = scout.status
+    const read = await inspectPage(page, previous, scout.wasInQueue)
+    if (read.status === 'in_queue' || read.status === 'waiting_for_queue') scout.wasInQueue = true
+    scout.navigating = false
+    scout.url = read.url
+    scout.host = read.host
+    scout.title = read.title
+    if (isHeldStatus(scout.status)) {
+      if (scout.status === 'hunting') scout.statusLabel = scout.statusLabel || 'Hunting…'
       const notice = read.queueNotice
-      fox.queueNotice = notice
+      scout.queueNotice = notice
       return
     }
-    fox.status = read.status
-    fox.statusLabel = read.statusLabel
-    fox.waitTime = read.waitTime
-    fox.queueNumber = read.queueNumber
-    fox.error = read.status === 'error' ? fox.error || 'Could not read page' : undefined
+    scout.status = read.status
+    scout.statusLabel = read.statusLabel
+    scout.waitTime = read.waitTime
+    scout.queueNumber = read.queueNumber
+    scout.error = read.status === 'error' ? scout.error || 'Could not read page' : undefined
     const notice = read.queueNotice
-    fox.queueNotice = notice
+    scout.queueNotice = notice
     const noticeKey = notice ? `${notice.id}|${notice.kind}|${notice.text}` : ''
-    if (notice && noticeKey !== fox.lastNoticeId) {
-      fox.lastNoticeId = noticeKey
-      send({ type: 'event', event: 'queueMessage', payload: { foxId: fox.id, notice } })
+    if (notice && noticeKey !== scout.lastNoticeId) {
+      scout.lastNoticeId = noticeKey
+      send({ type: 'event', event: 'queueMessage', payload: { scoutId: scout.id, notice } })
     }
-    if (!notice) fox.lastNoticeId = ''
-    if (isQueuePopEdge(previous, fox.status)) {
-      send({ type: 'event', event: 'queuePopped', payload: fox.id })
+    if (!notice) scout.lastNoticeId = ''
+    if (isQueuePopEdge(previous, scout.status)) {
+      send({ type: 'event', event: 'queuePopped', payload: scout.id })
     }
-    if (isAdmissionEdge(previous, fox.status)) {
-      fox.admittedFlashUntil = Date.now() + 12000
-      fox.admittedAt = Date.now()
-      send({ type: 'event', event: 'admitted', payload: fox.id })
+    if (isAdmissionEdge(previous, scout.status)) {
+      scout.admittedFlashUntil = Date.now() + 12000
+      scout.admittedAt = Date.now()
+      send({ type: 'event', event: 'admitted', payload: scout.id })
     }
   } catch (error) {
-    process.stderr.write(`[inspect ${fox.id}] ${error instanceof Error ? error.stack || error.message : error}\n`)
+    process.stderr.write(`[inspect ${scout.id}] ${error instanceof Error ? error.stack || error.message : error}\n`)
   }
 }
 
-async function shotFox(fox) {
-  if (pausedIds.has(fox.id)) return
-  const page = pageOf(fox)
+async function shotScout(scout) {
+  if (pausedIds.has(scout.id)) return
+  const page = pageOf(scout)
   if (!page) return
   try {
-    const focused = focusedId === fox.id
+    const focused = focusedId === scout.id
     const buffer = await page.screenshot({
       type: 'jpeg',
       quality: focused ? 56 : 28,
       animations: 'disabled'
     })
-    fox.screenshot = `data:image/jpeg;base64,${buffer.toString('base64')}`
-    fox.lastShotAt = Date.now()
+    scout.screenshot = `data:image/jpeg;base64,${buffer.toString('base64')}`
+    scout.lastShotAt = Date.now()
   } catch {
     /* keep last frame */
   }
@@ -1002,12 +1001,12 @@ async function mapPool(items, limit, fn) {
   )
 }
 
-function isUnhealthy(fox) {
-  if (isHeldStatus(fox.status)) return false
+function isUnhealthy(scout) {
+  if (isHeldStatus(scout.status)) return false
   const now = Date.now()
   return (
-    fox.status === 'error' ||
-    (fox.lastShotAt > 0 && now - fox.lastShotAt > STALE_MS && fox.status !== 'idle' && !fox.navigating)
+    scout.status === 'error' ||
+    (scout.lastShotAt > 0 && now - scout.lastShotAt > STALE_MS && scout.status !== 'idle' && !scout.navigating)
   )
 }
 
@@ -1018,32 +1017,32 @@ async function tick() {
   }
   ticking = true
   try {
-    const foxes = [...instances.values()]
-    await Promise.allSettled(foxes.map((fox) => inspectFox(fox)))
+    const scouts = [...instances.values()]
+    await Promise.allSettled(scouts.map((scout) => inspectScout(scout)))
 
     // Auto-restart scouts that have been unhealthy long enough.
     const now = Date.now()
-    for (const fox of foxes) {
-      if (!isUnhealthy(fox)) {
-        fox.unhealthySince = 0
+    for (const scout of scouts) {
+      if (!isUnhealthy(scout)) {
+        scout.unhealthySince = 0
         continue
       }
-      if (!fox.unhealthySince) {
-        fox.unhealthySince = now
+      if (!scout.unhealthySince) {
+        scout.unhealthySince = now
         continue
       }
-      if (now - fox.unhealthySince >= AUTO_RESTART_MS) {
-        fox.unhealthySince = 0
-        process.stderr.write(`[auto-restart ${fox.id}] unhealthy for ${AUTO_RESTART_MS / 1000}s, restarting\n`)
-        send({ type: 'event', event: 'autoRestart', payload: fox.id })
+      if (now - scout.unhealthySince >= AUTO_RESTART_MS) {
+        scout.unhealthySince = 0
+        process.stderr.write(`[auto-restart ${scout.id}] unhealthy for ${AUTO_RESTART_MS / 1000}s, restarting\n`)
+        send({ type: 'event', event: 'autoRestart', payload: scout.id })
         // The manager handles the actual restart; we just flag it.
       }
     }
 
     emitUpdate()
     const live = pausedIds.size > 0
-    if (!live && foxes.length) {
-      await mapPool(foxes, SHOT_CONCURRENCY, shotFox)
+    if (!live && scouts.length) {
+      await mapPool(scouts, SHOT_CONCURRENCY, shotScout)
       emitUpdate()
     }
   } finally {
@@ -1067,8 +1066,8 @@ function isOnQueue(url) {
   return /storequeue\.wizards\.com|queue-it\.net|queueittoken=/i.test(String(url || ''))
 }
 
-function setRushLabel(fox, label) {
-  fox.statusLabel = label
+function setRushLabel(scout, label) {
+  scout.statusLabel = label
   emitUpdate()
 }
 
@@ -1211,12 +1210,12 @@ function listClickTargets() {
     .filter((item) => item.text || item.aria || item.id)
 }
 
-async function dumpPage(fox, page, step) {
+async function dumpPage(scout, page, step) {
   if (!debugDumps || !dumpDir || !page) return
   if (SKIP_DUMP_STEPS.test(String(step))) return
   dumpSeq += 1
   const safe = String(step).replace(/[^\w.-]+/g, '_')
-  const base = `${String(dumpSeq).padStart(3, '0')}-scout${fox.id}-${safe}`
+  const base = `${String(dumpSeq).padStart(3, '0')}-scout${scout.id}-${safe}`
   try {
     await mkdir(dumpDir, { recursive: true })
     const html = await page.content().catch(() => '')
@@ -1340,34 +1339,34 @@ function scriptMainAddReady() {
   return r.width > 40 && r.height > 16
 }
 
-async function runRushCheckout(fox, page) {
+async function runRushCheckout(scout, page) {
   if (isOnQueue(page.url())) return
 
   const alreadyCart = await evaluateAnyFrame(page, scriptOnCart)
   if (!alreadyCart) {
-    setRushLabel(fox, 'Waiting for add to cart…')
+    setRushLabel(scout, 'Waiting for add to cart…')
     const readyUntil = Date.now() + 12000
     while (Date.now() < readyUntil) {
       throwIfAborted()
       if (await page.evaluate(scriptMainAddReady).catch(() => false)) break
       await wait(150)
     }
-    await dumpPage(fox, page, 'before-add-to-cart')
-    setRushLabel(fox, 'Adding to cart…')
+    await dumpPage(scout, page, 'before-add-to-cart')
+    setRushLabel(scout, 'Adding to cart…')
     const added = await clickByScript(page, scriptClickAdd, 12000)
-    trace(fox, 'add-to-cart', added ? 'clicked' : 'miss')
-    await dumpPage(fox, page, added ? 'after-add-to-cart' : 'miss-add-to-cart')
+    trace(scout, 'add-to-cart', added ? 'clicked' : 'miss')
+    await dumpPage(scout, page, added ? 'after-add-to-cart' : 'miss-add-to-cart')
     if (!added && !(await evaluateAnyFrame(page, scriptOnCart))) {
       throw new Error('Could not find Preorder now / Add to cart')
     }
 
     if (!(await evaluateAnyFrame(page, scriptOnCart))) {
-      setRushLabel(fox, 'Proceeding to cart…')
+      setRushLabel(scout, 'Proceeding to cart…')
       await wait(400)
-      await dumpPage(fox, page, 'before-proceed-to-cart')
+      await dumpPage(scout, page, 'before-proceed-to-cart')
       const proceeded = await clickByScript(page, scriptClickProceed, 16000)
-      trace(fox, 'proceed-to-cart', proceeded ? 'clicked' : 'miss')
-      await dumpPage(fox, page, proceeded ? 'after-proceed-to-cart' : 'miss-proceed-to-cart')
+      trace(scout, 'proceed-to-cart', proceeded ? 'clicked' : 'miss')
+      await dumpPage(scout, page, proceeded ? 'after-proceed-to-cart' : 'miss-proceed-to-cart')
       if (!proceeded && !(await evaluateAnyFrame(page, scriptOnCart))) {
         throw new Error('Could not find Proceed to Cart')
       }
@@ -1377,11 +1376,11 @@ async function runRushCheckout(fox, page) {
   if (isOnQueue(page.url())) return
 
   if (!(await evaluateAnyFrame(page, scriptOnCart))) {
-    setRushLabel(fox, 'Continue as guest…')
-    await dumpPage(fox, page, 'before-guest')
+    setRushLabel(scout, 'Continue as guest…')
+    await dumpPage(scout, page, 'before-guest')
     const guestClicked = await clickByScript(page, scriptClickGuest, 8000)
-    trace(fox, 'guest', guestClicked ? 'clicked' : 'miss')
-    await dumpPage(fox, page, guestClicked ? 'after-guest' : 'miss-guest')
+    trace(scout, 'guest', guestClicked ? 'clicked' : 'miss')
+    await dumpPage(scout, page, guestClicked ? 'after-guest' : 'miss-guest')
     if (!guestClicked && !isOnQueue(page.url()) && !/\/cart|checkout/i.test(page.url()) && !(await evaluateAnyFrame(page, scriptOnCart))) {
       throw new Error('Could not find Continue as guest')
     }
@@ -1390,21 +1389,21 @@ async function runRushCheckout(fox, page) {
   }
 
   if (isOnQueue(page.url())) {
-    setRushLabel(fox, 'Waiting in queue…')
+    setRushLabel(scout, 'Waiting in queue…')
     return
   }
 
-  setRushLabel(fox, 'Waiting for checkout…')
+  setRushLabel(scout, 'Waiting for checkout…')
   const stageUntil = Date.now() + 20000
   while (Date.now() < stageUntil) {
     throwIfAborted()
     if (isOnQueue(page.url())) {
-      setRushLabel(fox, 'Waiting in queue…')
+      setRushLabel(scout, 'Waiting in queue…')
       return
     }
     if (await evaluateAnyFrame(page, scriptOnShipping)) {
-      setRushLabel(fox, 'On shipping…')
-      await dumpPage(fox, page, 'on-shipping')
+      setRushLabel(scout, 'On shipping…')
+      await dumpPage(scout, page, 'on-shipping')
       return
     }
     if (await evaluateAnyFrame(page, scriptOnCart) || /\/cart/i.test(page.url())) {
@@ -1415,47 +1414,47 @@ async function runRushCheckout(fox, page) {
 
   const needsSecure = await evaluateAnyFrame(page, scriptOnCart)
   if (needsSecure || /\/cart/i.test(page.url())) {
-    setRushLabel(fox, 'Secure checkout…')
-    await dumpPage(fox, page, 'before-secure-checkout')
+    setRushLabel(scout, 'Secure checkout…')
+    await dumpPage(scout, page, 'before-secure-checkout')
     const clicked =
       (await clickByScript(page, scriptClickSecureCheckout, 8000)) ||
       (await clickByRole(page, /secure checkout/i, 4000))
-    trace(fox, 'secure-checkout', clicked ? 'clicked' : 'miss')
-    await dumpPage(fox, page, clicked ? 'after-secure-checkout' : 'miss-secure-checkout')
+    trace(scout, 'secure-checkout', clicked ? 'clicked' : 'miss')
+    await dumpPage(scout, page, clicked ? 'after-secure-checkout' : 'miss-secure-checkout')
     return
   }
 
   if (isOnQueue(page.url())) {
-    setRushLabel(fox, 'Waiting in queue…')
+    setRushLabel(scout, 'Waiting in queue…')
     return
   }
 }
 
-async function rushCheckoutFox(fox) {
-  const page = pageOf(fox)
-  if (!page) throw new Error(`Scout ${fox.id} has no page`)
+async function rushCheckoutScout(scout) {
+  const page = pageOf(scout)
+  if (!page) throw new Error(`Scout ${scout.id} has no page`)
   if (isOnQueue(page.url())) {
-    fox.navigating = false
+    scout.navigating = false
     return
   }
-  setRushLabel(fox, 'Adding to cart…')
+  setRushLabel(scout, 'Adding to cart…')
   try {
-    await runRushCheckout(fox, page)
-    await inspectFox(fox)
-    if (fox.status === 'loading' || fox.status === 'idle' || /waiting in queue/i.test(fox.statusLabel || '')) {
+    await runRushCheckout(scout, page)
+    await inspectScout(scout)
+    if (scout.status === 'loading' || scout.status === 'idle' || /waiting in queue/i.test(scout.statusLabel || '')) {
       if (isOnQueue(page.url())) {
-        fox.status = 'in_queue'
-        fox.statusLabel = statusLabel('in_queue', fox.waitTime)
+        scout.status = 'in_queue'
+        scout.statusLabel = statusLabel('in_queue', scout.waitTime)
       } else {
-        fox.statusLabel = 'In checkout / queue'
+        scout.statusLabel = 'In checkout / queue'
       }
     }
   } catch (error) {
-    fox.status = 'error'
-    fox.error = error instanceof Error ? error.message : String(error)
-    fox.statusLabel = 'Error'
+    scout.status = 'error'
+    scout.error = error instanceof Error ? error.message : String(error)
+    scout.statusLabel = 'Error'
   } finally {
-    fox.navigating = false
+    scout.navigating = false
     emitUpdate()
   }
 }
@@ -1647,9 +1646,9 @@ function scriptClickPlaceOrder() {
   return true
 }
 
-async function scrapeProductsFox(fox) {
-  if (!fox) return { products: [] }
-  const page = pageOf(fox)
+async function scrapeProductsScout(scout) {
+  if (!scout) return { products: [] }
+  const page = pageOf(scout)
   if (!page) return { products: [] }
   const products = await page.evaluate(scrapeProductLinks).catch(() => [])
   return { products: Array.isArray(products) ? products : [] }
@@ -1824,28 +1823,28 @@ async function waitForConfirmation(page, timeoutMs) {
   return false
 }
 
-async function autoRushFox(fox, qty) {
+async function autoRushScout(scout, qty) {
   throwIfAborted()
   autoQty = Math.max(1, Number(qty) || 1)
-  const page = pageOf(fox)
-  if (!page) throw new Error(`Scout ${fox.id} has no page`)
+  const page = pageOf(scout)
+  if (!page) throw new Error(`Scout ${scout.id} has no page`)
   if (isOnQueue(page.url())) return
-  setRushLabel(fox, `Setting qty ${autoQty}…`)
+  setRushLabel(scout, `Setting qty ${autoQty}…`)
   const qtyOk = await page.evaluate(setQtyInPage, autoQty).catch(() => false)
   if (!qtyOk) {
-    fox.status = 'error'
-    fox.error = `Could not set quantity to ${autoQty}`
-    fox.statusLabel = 'Error'
+    scout.status = 'error'
+    scout.error = `Could not set quantity to ${autoQty}`
+    scout.statusLabel = 'Error'
     emitUpdate()
-    throw new Error(fox.error)
+    throw new Error(scout.error)
   }
-  await dumpPage(fox, page, 'before-auto-rush')
-  await runRushCheckout(fox, page)
-  await dumpPage(fox, page, 'after-auto-rush')
-  await inspectFox(fox)
+  await dumpPage(scout, page, 'before-auto-rush')
+  await runRushCheckout(scout, page)
+  await dumpPage(scout, page, 'after-auto-rush')
+  await inspectScout(scout)
   throwIfAborted()
-  if (!isOnQueue(page.url()) && fox.status !== 'in_queue' && fox.status !== 'waiting_for_queue') {
-    send({ type: 'event', event: 'readyForPayment', payload: fox.id })
+  if (!isOnQueue(page.url()) && scout.status !== 'in_queue' && scout.status !== 'waiting_for_queue') {
+    send({ type: 'event', event: 'readyForPayment', payload: scout.id })
   }
 }
 
@@ -1861,16 +1860,16 @@ function scriptHasPlaceOrder() {
   })
 }
 
-async function fillCheckoutFox(fox) {
+async function fillCheckoutScout(scout) {
   throwIfAborted()
-  const page = pageOf(fox)
-  if (!page) throw new Error(`Scout ${fox.id} has no page`)
-  fox.status = 'purchasing'
-  fox.statusLabel = 'Opening checkout…'
-  fox.error = undefined
+  const page = pageOf(scout)
+  if (!page) throw new Error(`Scout ${scout.id} has no page`)
+  scout.status = 'purchasing'
+  scout.statusLabel = 'Opening checkout…'
+  scout.error = undefined
   emitUpdate()
-  trace(fox, 'fill', 'opening checkout')
-  await dumpPage(fox, page, 'checkout-start')
+  trace(scout, 'fill', 'opening checkout')
+  await dumpPage(scout, page, 'checkout-start')
   const leaveQueue = Date.now() + 45000
   while (Date.now() < leaveQueue && isOnQueue(page.url())) {
     throwIfAborted()
@@ -1880,13 +1879,13 @@ async function fillCheckoutFox(fox) {
   const onShipping = await evaluateAnyFrame(page, scriptOnShipping)
   const hasSecure = await evaluateAnyFrame(page, scriptOnCart)
   if (hasSecure && !onShipping) {
-    fox.statusLabel = 'Secure checkout…'
+    scout.statusLabel = 'Secure checkout…'
     emitUpdate()
-    await dumpPage(fox, page, 'before-secure-checkout')
+    await dumpPage(scout, page, 'before-secure-checkout')
     const clicked =
       (await clickByRole(page, /secure checkout/i, 4000)) || (await clickByScript(page, scriptClickSecureCheckout, 8000))
-    trace(fox, 'secure-checkout', clicked ? 'clicked' : 'miss')
-    await dumpPage(fox, page, clicked ? 'after-secure-checkout' : 'miss-secure-checkout')
+    trace(scout, 'secure-checkout', clicked ? 'clicked' : 'miss')
+    await dumpPage(scout, page, clicked ? 'after-secure-checkout' : 'miss-secure-checkout')
     const emailUntil = Date.now() + 10000
     while (Date.now() < emailUntil) {
       throwIfAborted()
@@ -1895,11 +1894,11 @@ async function fillCheckoutFox(fox) {
     }
   }
 
-  fox.statusLabel = 'Filling shipping…'
+  scout.statusLabel = 'Filling shipping…'
   emitUpdate()
   const data = parseAddress(shippingProfile)
   trace(
-    fox,
+    scout,
     'shipping',
     `line1="${data.street}" line2="${data.street2 || ''}" ${data.city} ${data.state} ${data.zip}`
   )
@@ -1911,11 +1910,11 @@ async function fillCheckoutFox(fox) {
     if (await evaluateAnyFrame(page, scriptHasPlaceOrder)) break
     await wait(300)
   }
-  await dumpPage(fox, page, 'after-shipping-fill')
+  await dumpPage(scout, page, 'after-shipping-fill')
 
-  fox.statusLabel = 'Filling payment…'
+  scout.statusLabel = 'Filling payment…'
   emitUpdate()
-  await dumpPage(fox, page, 'before-payment')
+  await dumpPage(scout, page, 'before-payment')
   const readyUntil = Date.now() + 25000
   while (Date.now() < readyUntil) {
     throwIfAborted()
@@ -1928,61 +1927,63 @@ async function fillCheckoutFox(fox) {
       (await clickByScript(page, scriptClickContinue, 2500)) ||
       (await clickByRole(page, /continue to (shipping|payment|billing|review)|review order/i, 1500))
     if (continued) {
-      trace(fox, 'continue', 'clicked continue/review')
+      trace(scout, 'continue', 'clicked continue/review')
       await wait(800)
     } else await wait(400)
   }
-  await dumpPage(fox, page, 'after-payment-fill')
-  fox.statusLabel = 'Ready to place…'
+  await dumpPage(scout, page, 'after-payment-fill')
+  const canPlace = await evaluateAnyFrame(page, scriptHasPlaceOrder)
+  if (!canPlace) throw new Error('Checkout is not ready to place')
+  scout.statusLabel = 'Ready to place…'
   emitUpdate()
-  trace(fox, 'fill', 'ready to place')
+  trace(scout, 'fill', 'ready to place')
 }
 
-async function placeOrderFox(fox) {
+async function placeOrderScout(scout) {
   throwIfAborted()
-  const page = pageOf(fox)
-  if (!page) throw new Error(`Scout ${fox.id} has no page`)
-  if (fox.status === 'purchased') return
+  const page = pageOf(scout)
+  if (!page) throw new Error(`Scout ${scout.id} has no page`)
+  if (scout.status === 'purchased') return
   const already = await waitForConfirmation(page, 1500)
   if (already) {
-    trace(fox, 'confirmed', 'already on confirmation page')
-    fox.status = 'purchased'
-    fox.statusLabel = 'Purchased'
+    trace(scout, 'confirmed', 'already on confirmation page')
+    scout.status = 'purchased'
+    scout.statusLabel = 'Purchased'
     emitUpdate()
     return
   }
   const qtyFine = await page.evaluate(readCartQtyOk, autoQty).catch(() => true)
   if (!qtyFine) throw new Error(`Cart quantity is not ${autoQty}`)
-  fox.status = 'purchasing'
-  fox.statusLabel = 'Placing order…'
+  scout.status = 'purchasing'
+  scout.statusLabel = 'Placing order…'
   emitUpdate()
   throwIfAborted()
-  if (!fox.placeClicked) {
-    await dumpPage(fox, page, 'before-place-order')
+  if (!scout.placeClicked) {
+    await dumpPage(scout, page, 'before-place-order')
     const placed =
       (await clickByRole(page, /place order|pay now/i, 8000)) ||
       (await clickByScript(page, scriptClickPlaceOrder, 20000))
-    await dumpPage(fox, page, placed ? 'after-place-order' : 'miss-place-order')
-    trace(fox, 'place-order', placed ? 'clicked' : 'miss')
+    await dumpPage(scout, page, placed ? 'after-place-order' : 'miss-place-order')
+    trace(scout, 'place-order', placed ? 'clicked' : 'miss')
     if (!placed) throw new Error('Could not find Place order')
-    fox.placeClicked = true
+    scout.placeClicked = true
   }
-  fox.statusLabel = 'Waiting for confirmation…'
+  scout.statusLabel = 'Waiting for confirmation…'
   emitUpdate()
   const confirmed = await waitForConfirmation(page, 90000)
-  await dumpPage(fox, page, confirmed ? 'confirmed' : 'miss-confirmation')
-  trace(fox, confirmed ? 'confirmed' : 'place-order', confirmed ? 'order confirmation seen' : 'no confirmation')
-  if (!confirmed) throw new Error('No order confirmation')
-  fox.status = 'purchased'
-  fox.statusLabel = 'Purchased'
+  await dumpPage(scout, page, confirmed ? 'confirmed' : 'miss-confirmation')
+  trace(scout, confirmed ? 'confirmed' : 'place-order', confirmed ? 'order confirmation seen' : 'no confirmation')
+  if (!confirmed) throw new Error('PLACE_UNCONFIRMED')
+  scout.status = 'purchased'
+  scout.statusLabel = 'Purchased'
   emitUpdate()
 }
 
-function abortFox(fox, reason) {
-  if (fox.status === 'purchased') return
-  fox.status = 'aborted'
-  fox.statusLabel = reason ? `Aborted · ${reason}` : 'Aborted'
-  fox.navigating = false
+function abortScout(scout, reason) {
+  if (scout.status === 'purchased') return
+  scout.status = 'aborted'
+  scout.statusLabel = reason ? `Aborted · ${reason}` : 'Aborted'
+  scout.navigating = false
 }
 
 async function handle(msg) {
@@ -1990,24 +1991,24 @@ async function handle(msg) {
   try {
     let result
     if (cmd === 'spawn') {
-      result = await spawnFox(msg.foxId, msg.profileDir)
+      result = await spawnScout(msg.scoutId, msg.profileDir)
     } else if (cmd === 'kill') {
-      await killFox(msg.foxId)
+      await killScout(msg.scoutId)
     } else if (cmd === 'goto') {
-      const fox = instances.get(msg.foxId)
+      const scout = instances.get(msg.scoutId)
       const target = normalizeUrl(msg.url)
       if (!target) throw new Error('Only http(s) URLs are allowed')
-      if (fox) await navigate(fox, target)
+      if (scout) await navigate(scout, target)
     } else if (cmd === 'gotoAll') {
       const target = normalizeUrl(msg.url)
       if (!target) throw new Error('Only http(s) URLs are allowed')
-      await Promise.allSettled([...instances.values()].map((fox) => navigate(fox, target)))
+      await Promise.allSettled([...instances.values()].map((scout) => navigate(scout, target)))
     } else if (cmd === 'rushCheckout') {
       autoAborted = false
-      await Promise.allSettled([...instances.values()].map((fox) => rushCheckoutFox(fox)))
+      await Promise.allSettled([...instances.values()].map((scout) => rushCheckoutScout(scout)))
     } else if (cmd === 'setProfile') {
       shippingProfile = readShipping(msg.profile)
-      await Promise.allSettled([...instances.values()].map((fox) => applyShippingToFox(fox)))
+      await Promise.allSettled([...instances.values()].map((scout) => applyShippingToScout(scout)))
     } else if (cmd === 'setAutoRun') {
       autoAborted = false
       autoQty = Math.max(1, Number(msg.qtyPerOrder) || 1)
@@ -2027,49 +2028,49 @@ async function handle(msg) {
         }
       }
     } else if (cmd === 'setHunting') {
-      const fox = instances.get(msg.foxId)
-      if (fox && fox.status !== 'purchased' && fox.status !== 'purchasing' && fox.status !== 'aborted') {
-        fox.status = 'hunting'
-        fox.statusLabel = 'Hunting…'
-        fox.error = undefined
+      const scout = instances.get(msg.scoutId)
+      if (scout && scout.status !== 'purchased' && scout.status !== 'purchasing' && scout.status !== 'aborted') {
+        scout.status = 'hunting'
+        scout.statusLabel = 'Hunting…'
+        scout.error = undefined
         emitUpdate()
       }
     } else if (cmd === 'scrapeProducts') {
-      const fox = instances.get(msg.foxId) || [...instances.values()][0]
-      result = await scrapeProductsFox(fox)
+      const scout = instances.get(msg.scoutId) || [...instances.values()][0]
+      result = await scrapeProductsScout(scout)
     } else if (cmd === 'autoRush') {
-      const fox = instances.get(msg.foxId)
-      if (!fox) throw new Error(`Scout ${msg.foxId} has no page`)
-      trace(fox, 'rush', `qty ${msg.qtyPerOrder || autoQty}`)
-      await autoRushFox(fox, msg.qtyPerOrder)
+      const scout = instances.get(msg.scoutId)
+      if (!scout) throw new Error(`Scout ${msg.scoutId} has no page`)
+      trace(scout, 'rush', `qty ${msg.qtyPerOrder || autoQty}`)
+      await autoRushScout(scout, msg.qtyPerOrder)
     } else if (cmd === 'fillCheckout') {
-      const fox = instances.get(msg.foxId)
-      if (!fox) throw new Error(`Scout ${msg.foxId} has no page`)
+      const scout = instances.get(msg.scoutId)
+      if (!scout) throw new Error(`Scout ${msg.scoutId} has no page`)
       try {
-        await fillCheckoutFox(fox)
+        await fillCheckoutScout(scout)
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
-        trace(fox, 'error', message)
-        if (fox.status !== 'purchased' && fox.status !== 'aborted') {
-          fox.status = 'error'
-          fox.error = message
-          fox.statusLabel = 'Error'
+        trace(scout, 'error', message)
+        if (scout.status !== 'purchased' && scout.status !== 'aborted') {
+          scout.status = 'error'
+          scout.error = message
+          scout.statusLabel = 'Error'
           emitUpdate()
         }
         throw error
       }
     } else if (cmd === 'placeOrder') {
-      const fox = instances.get(msg.foxId)
-      if (!fox) throw new Error(`Scout ${msg.foxId} has no page`)
+      const scout = instances.get(msg.scoutId)
+      if (!scout) throw new Error(`Scout ${msg.scoutId} has no page`)
       try {
-        await placeOrderFox(fox)
+        await placeOrderScout(scout)
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
-        trace(fox, 'error', message)
-        if (fox.status !== 'purchased' && fox.status !== 'aborted') {
-          fox.status = 'error'
-          fox.error = message
-          fox.statusLabel = 'Error'
+        trace(scout, 'error', message)
+        if (scout.status !== 'purchased' && scout.status !== 'aborted') {
+          scout.status = 'error'
+          scout.error = message
+          scout.statusLabel = 'Error'
           emitUpdate()
         }
         throw error
@@ -2080,48 +2081,48 @@ async function handle(msg) {
       debugDumps = false
       dumpDir = ''
       const reason = String(msg.reason || 'stopped')
-      for (const fox of instances.values()) {
-        abortFox(fox, reason)
-        trace(fox, 'abort', reason)
+      for (const scout of instances.values()) {
+        abortScout(scout, reason)
+        trace(scout, 'abort', reason)
       }
       emitUpdate()
     } else if (cmd === 'clearPayment') {
       clearPaymentSecrets()
     } else if (cmd === 'reload') {
-      const fox = instances.get(msg.foxId)
-      if (fox) {
-        const keepHunt = fox.status === 'hunting'
-        fox.navigating = true
-        fox.status = 'loading'
-        fox.statusLabel = 'Loading'
+      const scout = instances.get(msg.scoutId)
+      if (scout) {
+        const keepHunt = scout.status === 'hunting'
+        scout.navigating = true
+        scout.status = 'loading'
+        scout.statusLabel = 'Loading'
         try {
-          await fox.page.reload({ waitUntil: 'domcontentloaded' })
-          fox.error = undefined
+          await scout.page.reload({ waitUntil: 'domcontentloaded' })
+          scout.error = undefined
           if (keepHunt) {
-            fox.status = 'hunting'
-            fox.statusLabel = 'Hunting…'
+            scout.status = 'hunting'
+            scout.statusLabel = 'Hunting…'
           }
         } catch (error) {
-          fox.status = 'error'
-          fox.error = error instanceof Error ? error.message : 'Reload failed'
+          scout.status = 'error'
+          scout.error = error instanceof Error ? error.message : 'Reload failed'
         } finally {
-          fox.navigating = false
+          scout.navigating = false
         }
       }
     } else if (cmd === 'click') {
       const x = clamp(msg.nx, 0, 1) * VIEWPORT.width
       const y = clamp(msg.ny, 0, 1) * VIEWPORT.height
       const button = msg.button || 'left'
-      await onPages(msg.foxId, async (page) => {
+      await onPages(msg.scoutId, async (page) => {
         if (msg.double) await page.mouse.dblclick(x, y, { button })
         else await page.mouse.click(x, y, { button })
       })
     } else if (cmd === 'move') {
       const x = clamp(msg.nx, 0, 1) * VIEWPORT.width
       const y = clamp(msg.ny, 0, 1) * VIEWPORT.height
-      await onPages(msg.foxId, (page) => page.mouse.move(x, y))
+      await onPages(msg.scoutId, (page) => page.mouse.move(x, y))
     } else if (cmd === 'key') {
-      await onPages(msg.foxId, async (page) => {
+      await onPages(msg.scoutId, async (page) => {
         if (!msg.key) return
         try {
           if (msg.keyType === 'down') await page.keyboard.down(msg.key)
@@ -2134,16 +2135,16 @@ async function handle(msg) {
         }
       })
     } else if (cmd === 'scroll') {
-      await onPages(msg.foxId, (page) => page.mouse.wheel(msg.dx, msg.dy))
+      await onPages(msg.scoutId, (page) => page.mouse.wheel(msg.dx, msg.dy))
     } else if (cmd === 'setFocused') {
-      focusedId = msg.foxId
+      focusedId = msg.scoutId
     } else if (cmd === 'setPaused') {
-      if (msg.paused) pausedIds.add(String(msg.foxId))
-      else pausedIds.delete(String(msg.foxId))
+      if (msg.paused) pausedIds.add(String(msg.scoutId))
+      else pausedIds.delete(String(msg.scoutId))
     } else if (cmd === 'shutdown') {
       shuttingDown = true
       const ids = [...instances.keys()]
-      await Promise.all(ids.map((id) => killFox(id)))
+      await Promise.all(ids.map((id) => killScout(id)))
     } else {
       throw new Error(`Unknown command ${cmd}`)
     }

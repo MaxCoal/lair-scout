@@ -4,15 +4,15 @@ import { StatusChip } from './status'
 import { eventCoords, mouseButton } from '../input'
 
 type Props = {
-  fox: InstanceSnapshot | null
+  instance: InstanceSnapshot | null
   fleetCount: number
   standalone?: boolean
 }
 
-export default function DrivePad({ fox, fleetCount, standalone = false }: Props) {
+export default function DrivePad({ instance, fleetCount, standalone = false }: Props) {
   const lastMove = useRef(0)
 
-  if (!fox) {
+  if (!instance) {
     return <div className="placeholder">Spawn a scout to drive the fleet.</div>
   }
 
@@ -20,12 +20,12 @@ export default function DrivePad({ fox, fleetCount, standalone = false }: Props)
     <div className={`drive-pad ${standalone ? 'standalone' : ''}`}>
       <div className="focus-bar">
         <div>
-          <strong>Drive all · showing Scout {fox.id}</strong>
+          <strong>Drive all · showing Scout {instance.id}</strong>
           <div className="mono">
             Clicks, scroll, and keys go to {fleetCount} scout{fleetCount === 1 ? '' : 's'}
           </div>
         </div>
-        <StatusChip instance={fox} />
+        <StatusChip instance={instance} />
       </div>
       <div
         className="focus-stage herd"
@@ -35,10 +35,10 @@ export default function DrivePad({ fox, fleetCount, standalone = false }: Props)
         }}
         onContextMenu={(event) => event.preventDefault()}
       >
-        {fox.screenshot ? (
+        {instance.screenshot ? (
           <img
-            src={fox.screenshot}
-            alt={`Drive view of Scout ${fox.id}`}
+            src={instance.screenshot}
+            alt={`Drive view of Scout ${instance.id}`}
             onMouseMove={(event) => {
               const now = Date.now()
               if (now - lastMove.current < 32) return

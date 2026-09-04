@@ -22,7 +22,7 @@ export function scoutLogPath(): string {
 
 export function formatScoutLog(entry: ScoutLogEntry): string {
   const when = new Date(entry.at).toISOString()
-  const who = entry.foxId ? `scout ${entry.foxId}` : 'auto'
+  const who = entry.scoutId ? `scout ${entry.scoutId}` : 'auto'
   const detail = entry.detail ? `  ${entry.detail.replace(/\s+/g, ' ').trim()}` : ''
   const url = entry.url ? `  ${entry.url}` : ''
   return `${when}  [${who}]  ${entry.step}${detail}${url}`
@@ -35,7 +35,7 @@ export function recentScoutLogs(): ScoutLogEntry[] {
 export function appendScoutLog(partial: Partial<ScoutLogEntry> & { step: string }): ScoutLogEntry {
   const entry: ScoutLogEntry = {
     at: Number(partial.at) || Date.now(),
-    foxId: String(partial.foxId || ''),
+    scoutId: String(partial.scoutId || ''),
     step: String(partial.step || ''),
     detail: String(partial.detail || ''),
     url: String(partial.url || '')

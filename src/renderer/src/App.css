@@ -577,7 +577,7 @@ input {
   padding: 6px 6px 12px;
 }
 
-.fox-row {
+.scout-row {
   width: 100%;
   display: grid;
   grid-template-columns: 1fr auto;
@@ -593,22 +593,22 @@ input {
   text-align: left;
 }
 
-.fox-row-btns {
+.scout-row-btns {
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 
-.fox-row.active,
-.fox-row:hover {
+.scout-row.active,
+.scout-row:hover {
   border-color: var(--row-active-border);
 }
 
-.fox-row-title {
+.scout-row-title {
   font-weight: 600;
 }
 
-.fox-row-meta {
+.scout-row-meta {
   color: var(--muted);
   font-size: 12px;
   margin-top: 2px;

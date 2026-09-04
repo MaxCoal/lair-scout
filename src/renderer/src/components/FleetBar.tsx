@@ -29,6 +29,7 @@ type Props = {
   instanceSort: InstanceSort
   onCycleInstanceSort: () => void
   onQuit: () => void
+  fleetLocked?: boolean
 }
 
 export default function FleetBar({
@@ -50,7 +51,8 @@ export default function FleetBar({
   onOpenSettings,
   instanceSort,
   onCycleInstanceSort,
-  onQuit
+  onQuit,
+  fleetLocked = false
 }: Props) {
   const [draft, setDraft] = useState(String(count))
   const editing = useRef(false)
@@ -127,7 +129,7 @@ export default function FleetBar({
             applyDraft()
           }}
         >
-          <button className="btn" type="button" onClick={() => onScaleTo(count - 1)} disabled={count === 0}>
+          <button className="btn" type="button" onClick={() => onScaleTo(count - 1)} disabled={fleetLocked || count === 0}>
             −
           </button>
           <input
@@ -135,14 +137,15 @@ export default function FleetBar({
             value={draft}
             inputMode="numeric"
             aria-label="Fleet size"
-            title="Type a count and press Enter"
+            title={fleetLocked ? 'Fleet size is locked while Full Auto is running' : 'Type a count and press Enter'}
+            disabled={fleetLocked}
             onFocus={() => {
               editing.current = true
             }}
             onChange={(event) => setDraft(event.target.value.replace(/[^\d]/g, ''))}
             onBlur={applyDraft}
           />
-          <button className="btn" type="button" onClick={() => onScaleTo(count + 1)}>
+          <button className="btn" type="button" onClick={() => onScaleTo(count + 1)} disabled={fleetLocked}>
             +
           </button>
         </form>

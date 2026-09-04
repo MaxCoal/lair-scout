@@ -3,18 +3,18 @@ import type { InstanceSnapshot } from '@shared/types'
 
 const CHECKOUT_WINDOW_MS = 10 * 60 * 1000 // 10 minutes
 
-export function useAdmittedTimer(fox: InstanceSnapshot): string {
+export function useAdmittedTimer(instance: InstanceSnapshot): string {
   const [, setTick] = useState(0)
 
   useEffect(() => {
-    if (!fox.admittedAt || (fox.status !== 'admitted' && fox.status !== 'purchasing')) return undefined
+    if (!instance.admittedAt || (instance.status !== 'admitted' && instance.status !== 'purchasing')) return undefined
     const id = window.setInterval(() => setTick((n) => n + 1), 1000)
     return () => window.clearInterval(id)
-  }, [fox.admittedAt, fox.status])
+  }, [instance.admittedAt, instance.status])
 
-  if (!fox.admittedAt || (fox.status !== 'admitted' && fox.status !== 'purchasing')) return ''
+  if (!instance.admittedAt || (instance.status !== 'admitted' && instance.status !== 'purchasing')) return ''
 
-  const elapsed = Date.now() - fox.admittedAt
+  const elapsed = Date.now() - instance.admittedAt
   const remaining = CHECKOUT_WINDOW_MS - elapsed
 
   if (remaining <= 0) return 'Time up!'

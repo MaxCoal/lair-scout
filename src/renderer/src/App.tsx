@@ -110,16 +110,28 @@ export default function App() {
   }, [muted])
 
   useEffect(() => {
+    return window.lairscout.onOrderConfirmed(() => {
+      if (!muted) playTone(523, 1568)
+    })
+  }, [muted])
+
+  useEffect(() => {
     void window.lairscout.setFocused(focusedId)
   }, [focusedId])
 
   useEffect(() => {
     if (!driveAll || liveId) return undefined
     const onKey = (event: KeyboardEvent): void => {
-      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return
-      if (event.key === 'Escape' && focusedId) {
-        setLiveId(null)
-        setFocusedId(null)
+      if (settingsOpen) return
+      const el = event.target
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) return
+      if (el instanceof HTMLElement && (el.isContentEditable || el.closest('button, [role="button"], a'))) return
+      if (event.key === 'Tab') return
+      if (event.key === 'Escape') {
+        if (focusedId) {
+          setLiveId(null)
+          setFocusedId(null)
+        }
         return
       }
       if (event.type === 'keydown' && event.repeat) return
@@ -136,12 +148,12 @@ export default function App() {
       window.removeEventListener('keydown', onKey)
       window.removeEventListener('keyup', onKey)
     }
-  }, [driveAll, focusedId, liveId])
+  }, [driveAll, focusedId, liveId, settingsOpen])
 
   const focused = useMemo(
     () =>
-      instances.find((fox) => fox.id === focusedId) ??
-      instances.find((fox) => fox.focused) ??
+      instances.find((scout) => scout.id === focusedId) ??
+      instances.find((scout) => scout.focused) ??
       instances[0] ??
       null,
     [instances, focusedId]
@@ -152,8 +164,8 @@ export default function App() {
   const queueNotices = useMemo(() => {
     const hidden = new Set(dismissedNotices)
     const byId = new Map<string, QueueNotice>()
-    for (const fox of instances) {
-      const notice = fox.queueNotice
+    for (const scout of instances) {
+      const notice = scout.queueNotice
       if (!notice?.text) continue
       const key = `${notice.id}|${notice.text}`
       if (hidden.has(key) || byId.has(key)) continue
@@ -161,6 +173,12 @@ export default function App() {
     }
     return [...byId.values()]
   }, [instances, dismissedNotices])
+
+  const autoLocked =
+    fullAuto.phase !== 'idle' &&
+    fullAuto.phase !== 'aborted' &&
+    fullAuto.phase !== 'done' &&
+    fullAuto.phase !== 'error'
 
   const sendAll = (event: FormEvent): void => {
     event.preventDefault()
@@ -186,7 +204,7 @@ export default function App() {
   if (IS_DRIVE_PAD) {
     return (
       <div className="shell drive-shell">
-        <DrivePad fox={focused} fleetCount={instances.length} standalone />
+        <DrivePad instance={focused} fleetCount={instances.length} standalone />
       </div>
     )
   }
@@ -225,6 +243,7 @@ export default function App() {
           instanceSort={instanceSort}
           onCycleInstanceSort={() => setInstanceSort((value) => nextInstanceSort(value))}
           onQuit={() => void window.lairscout.quit()}
+          fleetLocked={autoLocked}
         />
         {mode === 'auto' ? <FullAutoPanel fleetSize={instances.length} status={fullAuto} /> : null}
       </div>
@@ -240,6 +259,7 @@ export default function App() {
             if (liveId === id) setLiveId(null)
             void window.lairscout.kill(id)
           }}
+          actionsLocked={autoLocked}
         />
         <main className={`main ${focused && liveId === focused.id ? 'locked' : ''}`}>
           {queueNotices.map((notice) => (
@@ -262,7 +282,7 @@ export default function App() {
                 Drive all is on. Clicks, scroll, and keys go to every scout. Open Drive window only if you want this on
                 another monitor.
               </p>
-              <DrivePad fox={focused} fleetCount={instances.length} />
+              <DrivePad instance={focused} fleetCount={instances.length} />
               <div className="drive-thumbs">
                 <InstanceGrid
                   instances={sorted}
@@ -275,7 +295,7 @@ export default function App() {
             </div>
           ) : focused && liveId === focused.id ? (
             <FocusView
-              fox={focused}
+              instance={focused}
               driveAll={false}
               fleetCount={instances.length}
               live

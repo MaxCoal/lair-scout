@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import type { AppSettings, ThemeId } from '@shared/types'
 import { normalizeShipping } from '@shared/shipping'
 import { applyTheme } from '../theme'
@@ -39,6 +39,7 @@ export default function SettingsModal({ open, onClose }: Props) {
   const [saved, setSaved] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const closeRef = useRef<HTMLButtonElement | null>(null)
 
   const applySettings = (settings: AppSettings): void => {
     const ship = normalizeShipping(settings)
@@ -68,6 +69,15 @@ export default function SettingsModal({ open, onClose }: Props) {
     setSaved(false)
     setError('')
     void window.lairscout.getSettings().then(applySettings)
+    const timer = window.setTimeout(() => closeRef.current?.focus(), 0)
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.clearTimeout(timer)
+      window.removeEventListener('keydown', onKey)
+    }
   }, [open])
 
   if (!open) return null
@@ -123,12 +133,21 @@ export default function SettingsModal({ open, onClose }: Props) {
     <div className="modal-backdrop" onClick={onClose}>
       <form
         className="modal settings-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-title"
         onClick={(event) => event.stopPropagation()}
         onSubmit={onSave}
       >
         <div className="modal-head">
-          <strong>Settings</strong>
-          <button className="icon-btn" type="button" onClick={onClose} aria-label="Close settings">
+          <strong id="settings-title">Settings</strong>
+          <button
+            ref={closeRef}
+            className="icon-btn"
+            type="button"
+            onClick={onClose}
+            aria-label="Close settings"
+          >
             ×
           </button>
         </div>

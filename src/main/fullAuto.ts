@@ -1,6 +1,6 @@
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { app } from 'electron'
+import { app, powerSaveBlocker } from 'electron'
 import type { FoilHint, FullAutoArmInput, FullAutoStatus, ProductCandidate, ShippingProfile } from '@shared/types'
 import { shippingReady } from '@shared/shipping'
 import type { CardSecrets } from './cardVault'
@@ -38,8 +38,9 @@ export type FullAutoHost = {
   fireOn: (id: string, cmd: string, payload: Record<string, unknown>) => void
   shipping: () => ShippingProfile
   card: () => CardSecrets
-  log: (step: string, detail?: string, foxId?: string) => void
+  log: (step: string, detail?: string, scoutId?: string) => void
   setDumpDir: (dir: string) => void
+  orderConfirmed: (id: string) => void
 }
 
 type Run = {
@@ -59,6 +60,7 @@ export class FullAutoRunner {
   private warmupTimer: NodeJS.Timeout | null = null
   private goLiveTimer: NodeJS.Timeout | null = null
   private huntTimer: NodeJS.Timeout | null = null
+  private sleepBlocker: number | null = null
   private listeners = new Set<(status: FullAutoStatus) => void>()
 
   constructor(private host: FullAutoHost) {}
@@ -116,6 +118,7 @@ export class FullAutoRunner {
     }
     this.host.setDumpDir(dumpDir)
     this.host.log('arm', `${productQuery} · fleet ${fleetSize} · max ${maxOrders}`)
+    this.blockSleep()
     this.set({
       phase: 'armed',
       productQuery,
@@ -147,6 +150,7 @@ export class FullAutoRunner {
 
   async disarm(): Promise<FullAutoStatus> {
     this.clearTimers()
+    this.unblockSleep()
     const wasActive = this.run != null
     this.run = null
     this.host.setDumpDir('')
@@ -163,6 +167,7 @@ export class FullAutoRunner {
 
   async shutdown(): Promise<void> {
     this.clearTimers()
+    this.unblockSleep()
     const wasActive = this.run != null
     this.run = null
     if (wasActive) await this.abortWorkers('shutdown')
@@ -176,6 +181,17 @@ export class FullAutoRunner {
     this.warmupTimer = null
     this.goLiveTimer = null
     this.huntTimer = null
+  }
+
+  private blockSleep(): void {
+    if (this.sleepBlocker != null) return
+    this.sleepBlocker = powerSaveBlocker.start('prevent-app-suspension')
+  }
+
+  private unblockSleep(): void {
+    if (this.sleepBlocker == null) return
+    if (powerSaveBlocker.isStarted(this.sleepBlocker)) powerSaveBlocker.stop(this.sleepBlocker)
+    this.sleepBlocker = null
   }
 
   private paymentPayload(): Record<string, unknown> {
@@ -212,7 +228,7 @@ export class FullAutoRunner {
       await this.pushAutoConfig()
       await Promise.all(
         this.host.workerIds().map((id) =>
-          this.host.callOn(id, 'goto', { foxId: id, url: HOME_URL }, 60000).catch(() => undefined)
+          this.host.callOn(id, 'goto', { scoutId: id, url: HOME_URL }, 60000).catch(() => undefined)
         )
       )
       await sleep(1200)
@@ -243,7 +259,7 @@ export class FullAutoRunner {
     this.set({ phase: 'hunting' })
     this.host.log('hunt', `searching for "${this.status.productQuery}"`)
     for (const id of this.host.workerIds()) {
-      this.host.fireOn(id, 'setHunting', { foxId: id })
+      this.host.fireOn(id, 'setHunting', { scoutId: id })
     }
     await this.huntTick()
     if (this.huntTimer) clearInterval(this.huntTimer)
@@ -253,7 +269,7 @@ export class FullAutoRunner {
   private async scrapeAll(): Promise<ProductHit[]> {
     const results = await Promise.all(
       this.host.workerIds().map((id) =>
-        this.host.callOn(id, 'scrapeProducts', { foxId: id }, 20000).catch(() => ({ products: [] }))
+        this.host.callOn(id, 'scrapeProducts', { scoutId: id }, 20000).catch(() => ({ products: [] }))
       )
     )
     const hits: ProductHit[] = []
@@ -277,8 +293,8 @@ export class FullAutoRunner {
       let match = await this.considerHits('live')
       if (!match && this.run && !this.status.matchedUrl) {
         const hunter = ids[Math.floor(Date.now() / HUNT_MS) % ids.length]
-        await this.host.callOn(hunter, 'reload', { foxId: hunter }, 30000).catch(() => undefined)
-        this.host.fireOn(hunter, 'setHunting', { foxId: hunter })
+        await this.host.callOn(hunter, 'reload', { scoutId: hunter }, 30000).catch(() => undefined)
+        this.host.fireOn(hunter, 'setHunting', { scoutId: hunter })
         await sleep(400)
         match = await this.considerHits('reload')
       }
@@ -326,10 +342,10 @@ export class FullAutoRunner {
     const ids = this.host.workerIds()
     this.set({ phase: 'rushing' })
     await Promise.allSettled(
-      ids.map((id) => this.host.callOn(id, 'goto', { foxId: id, url: match.url }, 60000))
+      ids.map((id) => this.host.callOn(id, 'goto', { scoutId: id, url: match.url }, 60000))
     )
     await Promise.allSettled(
-      ids.map((id) => this.host.callOn(id, 'autoRush', { foxId: id, qtyPerOrder: this.status.qtyPerOrder }, 150000))
+      ids.map((id) => this.host.callOn(id, 'autoRush', { scoutId: id, qtyPerOrder: this.status.qtyPerOrder }, 150000))
     )
   }
 
@@ -364,7 +380,7 @@ export class FullAutoRunner {
     if (this.run.completing.has(id) || this.run.confirmed.has(id)) return
     if (this.status.phase === 'aborted' || this.status.phase === 'done') {
       this.host.log('abort', `phase is ${this.status.phase}`, id)
-      this.host.fireOn(id, 'abortAuto', { foxId: id, reason: `phase ${this.status.phase}` })
+      this.host.fireOn(id, 'abortAuto', { scoutId: id, reason: `phase ${this.status.phase}` })
       return
     }
     this.run.completing.add(id)
@@ -372,11 +388,23 @@ export class FullAutoRunner {
     this.host.log('fill', 'starting checkout fill', id)
     let holdCompleting = false
     try {
-      await this.host.callOn(id, 'fillCheckout', { foxId: id }, 120000)
+      if (this.run.claimed.has(id)) {
+        this.host.log('place', 'already claimed — waiting for confirmation', id)
+        await this.host.callOn(id, 'placeOrder', { scoutId: id }, 120000)
+        if (!this.run) return
+        this.run.claimed.delete(id)
+        this.run.confirmed.add(id)
+        this.host.log('confirmed', `order ${this.run.confirmed.size}/${this.status.maxOrders}`, id)
+        this.set({ ordersConfirmed: this.run.confirmed.size, error: undefined })
+        this.host.orderConfirmed(id)
+        if (this.run.confirmed.size >= this.status.maxOrders) await this.finish()
+        return
+      }
+      await this.host.callOn(id, 'fillCheckout', { scoutId: id }, 120000)
       if (!this.run) return
       if (this.run.confirmed.size >= this.status.maxOrders) {
         this.host.log('abort', 'max orders already confirmed after fill', id)
-        this.host.fireOn(id, 'abortAuto', { foxId: id, reason: 'max orders already confirmed' })
+        this.host.fireOn(id, 'abortAuto', { scoutId: id, reason: 'max orders already confirmed' })
         return
       }
       if (!this.claim(id)) {
@@ -390,18 +418,32 @@ export class FullAutoRunner {
         return
       }
       this.host.log('place', 'claimed slot, placing order', id)
-      await this.host.callOn(id, 'placeOrder', { foxId: id }, 120000)
+      await this.host.callOn(id, 'placeOrder', { scoutId: id }, 120000)
+      if (!this.run) return
       this.run.claimed.delete(id)
       this.run.confirmed.add(id)
       this.host.log('confirmed', `order ${this.run.confirmed.size}/${this.status.maxOrders}`, id)
       this.set({ ordersConfirmed: this.run.confirmed.size, error: undefined })
+      this.host.orderConfirmed(id)
       if (this.run.confirmed.size >= this.status.maxOrders) {
         await this.finish()
       }
     } catch (error) {
-      this.release(id)
       const message = error instanceof Error ? error.message : String(error)
+      const placedUnconfirmed = /PLACE_UNCONFIRMED/.test(message)
+      if (!placedUnconfirmed) this.release(id)
       if (!this.run) return
+      if (placedUnconfirmed) {
+        this.host.log('ambiguous', 'place clicked but no confirmation — holding slot', id)
+        this.set({ error: `Scout ${id}: placed, waiting for confirmation` })
+        holdCompleting = true
+        setTimeout(() => {
+          if (!this.run || this.status.phase === 'done' || this.status.phase === 'aborted') return
+          this.run.completing.delete(id)
+          void this.tryComplete(id)
+        }, 3000)
+        return
+      }
       const attempts = (this.run.checkoutAttempts.get(id) || 0) + 1
       this.run.checkoutAttempts.set(id, attempts)
       if (attempts >= MAX_CHECKOUT_ATTEMPTS) {
@@ -422,6 +464,30 @@ export class FullAutoRunner {
     }
   }
 
+  onScoutGone(id: string): void {
+    if (!this.run) return
+    this.run.claimed.delete(id)
+    this.run.completing.delete(id)
+    this.run.checkoutAttempts.delete(id)
+  }
+
+  async onSoldOut(): Promise<void> {
+    if (!this.run || !this.active()) return
+    this.host.log('stock', 'sold out notice')
+    const busy = new Set([...this.run.claimed, ...this.run.completing, ...this.run.confirmed])
+    for (const id of this.host.workerIds()) {
+      if (busy.has(id)) continue
+      this.host.log('abort', 'sold out', id)
+      this.host.fireOn(id, 'abortAuto', { scoutId: id, reason: 'sold out' })
+    }
+    this.set({ error: 'Sold out — idle scouts aborted' })
+    if (!this.run.claimed.size && !this.run.completing.size) {
+      if (this.run.confirmed.size > 0) await this.finish()
+      else await this.disarm()
+      if (this.status.phase === 'aborted') this.set({ error: 'Sold out — stopped' })
+    }
+  }
+
   private async finish(): Promise<void> {
     this.clearTimers()
     const purchased = this.run?.confirmed || new Set()
@@ -429,10 +495,11 @@ export class FullAutoRunner {
     for (const id of this.host.workerIds()) {
       if (!purchased.has(id)) {
         this.host.log('abort', 'max orders confirmed', id)
-        this.host.fireOn(id, 'abortAuto', { foxId: id, reason: 'max orders confirmed' })
+        this.host.fireOn(id, 'abortAuto', { scoutId: id, reason: 'max orders confirmed' })
       }
     }
     this.run = null
+    this.unblockSleep()
     await this.clearWorkerPayment()
     this.set({ phase: 'done', hasCvv: false })
   }
@@ -440,7 +507,7 @@ export class FullAutoRunner {
   private async abortWorkers(reason = 'stopped'): Promise<void> {
     await Promise.all(
       this.host.workerIds().map((id) =>
-        this.host.callOn(id, 'abortAuto', { foxId: id, reason }).catch(() => undefined)
+        this.host.callOn(id, 'abortAuto', { scoutId: id, reason }).catch(() => undefined)
       )
     )
   }
@@ -448,7 +515,7 @@ export class FullAutoRunner {
   private async clearWorkerPayment(): Promise<void> {
     await Promise.all(
       this.host.workerIds().map((id) =>
-        this.host.callOn(id, 'clearPayment', { foxId: id }).catch(() => undefined)
+        this.host.callOn(id, 'clearPayment', { scoutId: id }).catch(() => undefined)
       )
     )
   }
@@ -457,13 +524,13 @@ export class FullAutoRunner {
     if (!this.run || !this.active()) return
     await this.host.callOn(id, 'setAutoRun', this.paymentPayload()).catch(() => undefined)
     if (this.status.matchedUrl) {
-      await this.host.callOn(id, 'goto', { foxId: id, url: this.status.matchedUrl }, 60000).catch(() => undefined)
-      await this.host.callOn(id, 'autoRush', { foxId: id, qtyPerOrder: this.status.qtyPerOrder }, 150000).catch(() => undefined)
+      await this.host.callOn(id, 'goto', { scoutId: id, url: this.status.matchedUrl }, 60000).catch(() => undefined)
+      await this.host.callOn(id, 'autoRush', { scoutId: id, qtyPerOrder: this.status.qtyPerOrder }, 150000).catch(() => undefined)
       return
     }
     if (this.status.phase === 'warming' || this.status.phase === 'hunting' || this.status.phase === 'armed') {
-      await this.host.callOn(id, 'goto', { foxId: id, url: HOME_URL }, 60000).catch(() => undefined)
-      if (this.status.phase === 'hunting') this.host.fireOn(id, 'setHunting', { foxId: id })
+      await this.host.callOn(id, 'goto', { scoutId: id, url: HOME_URL }, 60000).catch(() => undefined)
+      if (this.status.phase === 'hunting') this.host.fireOn(id, 'setHunting', { scoutId: id })
     }
   }
 }
