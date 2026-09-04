@@ -69,17 +69,28 @@ export async function saveSettings(update: SettingsUpdate): Promise<AppSettings>
 
   const current = await loadCardVault()
   const typedNumber = String(update.cardNumber || '').trim()
-  const nextCard: CardSecrets = {
-    holderName: String(update.cardHolderName ?? current.holderName).trim() || shipping.name,
-    number: typedNumber && !looksMasked(typedNumber) ? typedNumber.replace(/\s+/g, '') : current.number,
-    expiry: String(update.cardExpiry ?? current.expiry).trim() || current.expiry,
-    last4: current.last4,
-    llmApiKey:
-      update.llmApiKey == null || update.llmApiKey === ''
-        ? current.llmApiKey
-        : String(update.llmApiKey).trim()
-  }
-  if (nextCard.number || nextCard.llmApiKey || nextCard.expiry) {
+  const nextCard: CardSecrets = update.clearCard
+    ? {
+        holderName: String(update.cardHolderName ?? current.holderName).trim() || shipping.name,
+        number: '',
+        expiry: '',
+        last4: '',
+        llmApiKey:
+          update.llmApiKey == null || update.llmApiKey === ''
+            ? current.llmApiKey
+            : String(update.llmApiKey).trim()
+      }
+    : {
+        holderName: String(update.cardHolderName ?? current.holderName).trim() || shipping.name,
+        number: typedNumber && !looksMasked(typedNumber) ? typedNumber.replace(/\s+/g, '') : current.number,
+        expiry: String(update.cardExpiry ?? current.expiry).trim() || current.expiry,
+        last4: current.last4,
+        llmApiKey:
+          update.llmApiKey == null || update.llmApiKey === ''
+            ? current.llmApiKey
+            : String(update.llmApiKey).trim()
+      }
+  if (update.clearCard || nextCard.number || nextCard.llmApiKey || nextCard.expiry) {
     await saveCardVault(nextCard)
   }
   const saved = await loadCardVault()

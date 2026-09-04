@@ -13,6 +13,9 @@ import { applyTheme } from './theme'
 
 const DEFAULT_URL = 'https://secretlair.wizards.com/us'
 const IS_DRIVE_PAD = window.location.hash === '#drive'
+const DISMISSED_NOTICE_CAP = 80
+
+let toneContext: AudioContext | null = null
 
 const IDLE_AUTO: FullAutoStatus = {
   phase: 'idle',
@@ -33,7 +36,8 @@ const IDLE_AUTO: FullAutoStatus = {
 }
 
 function playTone(startHz: number, endHz: number): void {
-  const ctx = new AudioContext()
+  const ctx = toneContext ?? new AudioContext()
+  toneContext = ctx
   const osc = ctx.createOscillator()
   const gain = ctx.createGain()
   osc.type = 'triangle'
@@ -243,7 +247,9 @@ export default function App() {
               key={`${notice.id}|${notice.text}`}
               notice={notice}
               onDismiss={() =>
-                setDismissedNotices((ids) => [...ids, `${notice.id}|${notice.text}`])
+                setDismissedNotices((ids) =>
+                  [...ids, `${notice.id}|${notice.text}`].slice(-DISMISSED_NOTICE_CAP)
+                )
               }
             />
           ))}

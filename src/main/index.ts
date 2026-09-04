@@ -17,7 +17,7 @@ function appIcon(): string | undefined {
 function rendererPrefs() {
   return {
     preload: join(__dirname, '../preload/index.js'),
-    sandbox: false,
+    sandbox: true,
     contextIsolation: true,
     nodeIntegration: false
   }

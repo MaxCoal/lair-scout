@@ -175,10 +175,11 @@ export type SettingsUpdate = ShippingProfile & {
   cardNumber?: string
   cardExpiry?: string
   llmApiKey?: string
+  clearCard?: boolean
 }
 
 export type LairScoutAPI = {
-  spawn: () => Promise<void>
+  spawn: () => Promise<string>
   scaleTo: (count: number) => Promise<void>
   kill: (id: string) => Promise<void>
   restart: (id: string) => Promise<void>

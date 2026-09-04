@@ -94,7 +94,7 @@ async function readScoutProc(rootPids: number[]): Promise<{ bytes: number; cpuSe
       [
         '-NoProfile',
         '-Command',
-        `$ids = [int[]]@(${list}); $set = [System.Collections.Generic.HashSet[int]]::new(); foreach ($i in $ids) { [void]$set.Add($i) }; $procs = Get-CimInstance Win32_Process; $added = $true; while ($added) { $added = $false; foreach ($p in $procs) { $id = [int]$p.ProcessId; $parent = [int]$p.ParentProcessId; if ($set.Contains($parent) -and -not $set.Contains($id)) { [void]$set.Add($id); $added = $true } } }; $sum = [int64]0; $cpu = 0.0; Get-Process -Id @($set) -ErrorAction SilentlyContinue | ForEach-Object { $sum += $_.WorkingSet64; if ($_.CPU) { $cpu += $_.CPU } }; Write-Output "$sum $cpu"`
+        `$ids = [int[]]@(${list}); $set = [System.Collections.Generic.HashSet[int]]::new(); foreach ($i in $ids) { [void]$set.Add($i) }; $procs = Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId; $added = $true; while ($added) { $added = $false; foreach ($p in $procs) { $id = [int]$p.ProcessId; $parent = [int]$p.ParentProcessId; if ($set.Contains($parent) -and -not $set.Contains($id)) { [void]$set.Add($id); $added = $true } } }; $sum = [int64]0; $cpu = 0.0; Get-Process -Id @($set) -ErrorAction SilentlyContinue | ForEach-Object { $sum += $_.WorkingSet64; if ($_.CPU) { $cpu += $_.CPU } }; Write-Output "$sum $cpu"`
       ],
       { windowsHide: true, timeout: 5000 }
     )

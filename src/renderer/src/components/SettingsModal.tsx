@@ -33,6 +33,7 @@ export default function SettingsModal({ open, onClose }: Props) {
   const [cardNumber, setCardNumber] = useState('')
   const [cardExpiry, setCardExpiry] = useState('')
   const [hasCard, setHasCard] = useState(false)
+  const [cardLast4, setCardLast4] = useState('')
   const [llmApiKey, setLlmApiKey] = useState('')
   const [hasLlmKey, setHasLlmKey] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -56,6 +57,7 @@ export default function SettingsModal({ open, onClose }: Props) {
     setCardNumber(settings.hasCard ? maskNumber(settings.cardLast4) : '')
     setCardExpiry(settings.cardExpiry || '')
     setHasCard(settings.hasCard)
+    setCardLast4(settings.cardLast4 || '')
     setHasLlmKey(settings.hasLlmKey)
     setLlmApiKey('')
     applyTheme(settings.theme)
@@ -90,6 +92,7 @@ export default function SettingsModal({ open, onClose }: Props) {
     cardNumber: string
     cardExpiry: string
     llmApiKey: string
+    clearCard?: boolean
   }): Promise<void> => {
     setSaving(true)
     setError('')
@@ -258,6 +261,12 @@ export default function SettingsModal({ open, onClose }: Props) {
           className="btn ghost"
           type="button"
           onClick={() => {
+            if (hasCard && cardLast4 !== '4242') {
+              const ok = window.confirm(
+                'This replaces the card saved in Settings with the Stripe test card 4242. Continue?'
+              )
+              if (!ok) return
+            }
             const ship = shippingFields()
             void persist({
               ...ship,
@@ -281,6 +290,26 @@ export default function SettingsModal({ open, onClose }: Props) {
         >
           Use test card
         </button>
+        {hasCard ? (
+          <button
+            className="btn ghost"
+            type="button"
+            onClick={() => {
+              if (!window.confirm('Remove the saved card from this PC?')) return
+              void persist({
+                ...shippingFields(),
+                theme,
+                cardHolderName: '',
+                cardNumber: '',
+                cardExpiry: '',
+                llmApiKey,
+                clearCard: true
+              })
+            }}
+          >
+            Clear saved card
+          </button>
+        ) : null}
         <label className="field">
           <span>Name on card</span>
           <input

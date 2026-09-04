@@ -40,13 +40,19 @@ export function parseAddressBlob(address: string): Pick<ShippingProfile, 'addres
   let state = ''
   let zip = ''
   const last = lines[lines.length - 1] || ''
+  const streetCityStateZip = last.match(/^(.+?),\s*([^,]+),\s*([A-Za-z]{2})\s+(\d{5}(?:-\d{4})?)$/)
   const cityStateZip = last.match(/^(.+?),\s*([A-Za-z]{2})\s+(\d{5}(?:-\d{4})?)$/)
-  if (cityStateZip) {
+  if (streetCityStateZip && lines.length === 1) {
+    address1 = streetCityStateZip[1].trim()
+    city = streetCityStateZip[2].trim()
+    state = streetCityStateZip[3].toUpperCase()
+    zip = streetCityStateZip[4]
+  } else if (cityStateZip) {
     city = cityStateZip[1]
     state = cityStateZip[2].toUpperCase()
     zip = cityStateZip[3]
     if (lines.length === 1) {
-      address1 = last.slice(0, last.length - cityStateZip[0].length).replace(/,\s*$/, '').trim() || address1
+      address1 = last.slice(0, last.length - cityStateZip[0].length).replace(/,\s*$/, '').trim()
     } else {
       address1 = lines[0]
       address2 = lines

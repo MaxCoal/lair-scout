@@ -39,10 +39,14 @@ function encrypt(value: string): string {
 
 function decrypt(value: string): string {
   if (!value) return ''
-  if (!safeStorage.isEncryptionAvailable()) return ''
+  if (!safeStorage.isEncryptionAvailable()) {
+    console.error('card vault: Windows encryption is unavailable')
+    return ''
+  }
   try {
     return safeStorage.decryptString(Buffer.from(value, 'base64'))
-  } catch {
+  } catch (error) {
+    console.error('card vault decrypt failed', error)
     return ''
   }
 }
@@ -69,6 +73,9 @@ export async function loadCardVault(): Promise<CardSecrets> {
     const number = decrypt(String(raw.panCipher || ''))
     const expiry = decrypt(String(raw.expiryCipher || '')) || String(raw.expiry || '')
     const llmApiKey = decrypt(String(raw.llmKeyCipher || ''))
+    if (raw.panCipher && !number) {
+      console.error('card vault: stored card could not be decrypted')
+    }
     return {
       holderName: String(raw.holderName || ''),
       number,
@@ -76,7 +83,8 @@ export async function loadCardVault(): Promise<CardSecrets> {
       last4: String(raw.last4 || last4Of(number)),
       llmApiKey
     }
-  } catch {
+  } catch (error) {
+    console.error('card vault load failed', error)
     return emptyCard()
   }
 }

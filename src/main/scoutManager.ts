@@ -63,6 +63,7 @@ export class ScoutManager {
   private strayDone: Promise<void>
   private markStrayDone: () => void = () => undefined
   private seenNotices = new Set<string>()
+  private seenNoticeKeys: string[] = []
 
   constructor() {
     this.strayDone = new Promise((resolve) => {
@@ -662,6 +663,11 @@ export class ScoutManager {
       const key = `${notice?.id || ''}|${kind}|${text}`
       if (this.seenNotices.has(key)) return
       this.seenNotices.add(key)
+      this.seenNoticeKeys.push(key)
+      if (this.seenNoticeKeys.length > 400) {
+        const drop = this.seenNoticeKeys.splice(0, 100)
+        for (const old of drop) this.seenNotices.delete(old)
+      }
       const title = kind === 'stock' ? 'Out of stock' : notice?.time ? `Queue message · ${notice.time}` : 'Queue message'
       this.emitNotice('instances:queueMessage', String(payload.foxId || foxId), title, text, {
         foxId: String(payload.foxId || foxId),

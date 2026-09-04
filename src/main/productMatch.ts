@@ -200,12 +200,16 @@ export async function pickWithLlm(
         ]
       })
     })
-    if (!response.ok) return pickLocalMatch(candidates)
+    if (!response.ok) {
+      console.error('OpenAI product pick failed', response.status)
+      return pickLocalMatch(candidates)
+    }
     const body = (await response.json()) as { choices?: { message?: { content?: string } }[] }
     const text = String(body.choices?.[0]?.message?.content || '').trim()
     const picked = pool.find((item) => text.includes(item.url))
     return picked || pickLocalMatch(candidates)
-  } catch {
+  } catch (error) {
+    console.error('OpenAI product pick failed', error)
     return pickLocalMatch(candidates)
   }
 }

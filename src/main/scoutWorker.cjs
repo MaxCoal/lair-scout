@@ -10,9 +10,9 @@ const { execFileSync } = require('node:child_process')
 const readline = require('node:readline')
 
 const VIEWPORT = { width: 1280, height: 720 }
-const GRID_TICK_MS = 50
+const GRID_TICK_MS = 400
 const LIVE_TICK_MS = 1400
-const SHOT_CONCURRENCY = 6
+const SHOT_CONCURRENCY = 4
 const QUEUE_HOST = /queue-it\.net|queueit\.com|storequeue\.wizards\.com/i
 const PREQUEUE_COPY =
   /secret lair lounge|waiting room|the (sale|event|drop) has not (yet )?started|has not opened yet|please wait.*begin|we're getting ready|we are getting ready|pre-?queue|before the queue|queue has not started|not started yet|will begin shortly|doors (have not|haven'?t) opened/i
@@ -48,6 +48,18 @@ let autoQty = 1
 let autoAborted = false
 let debugDumps = false
 let dumpDir = ''
+
+function emptyPayment() {
+  return { holderName: '', number: '', expiry: '', cvv: '' }
+}
+
+function clearPaymentSecrets() {
+  paymentProfile = emptyPayment()
+}
+
+const SKIP_DUMP_STEPS =
+  /^(before-payment|after-payment-fill|before-place-order|after-place-order|miss-place-order|confirmed|miss-confirmation)$/
+
 let dumpSeq = 0
 let autoProductUrl = ''
 
@@ -86,8 +98,14 @@ function hostOf(url) {
 function normalizeUrl(raw) {
   const trimmed = String(raw || '').trim()
   if (!trimmed) return ''
-  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed)) return trimmed
-  return `https://${trimmed}`
+  const withScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed) ? trimmed : `https://${trimmed}`
+  try {
+    const url = new URL(withScheme)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return ''
+    return url.toString()
+  } catch {
+    return ''
+  }
 }
 
 function clamp(value, min, max) {
@@ -958,8 +976,12 @@ async function shotFox(fox) {
   const page = pageOf(fox)
   if (!page) return
   try {
-    const quality = focusedId === fox.id ? 58 : 38
-    const buffer = await page.screenshot({ type: 'jpeg', quality })
+    const focused = focusedId === fox.id
+    const buffer = await page.screenshot({
+      type: 'jpeg',
+      quality: focused ? 56 : 28,
+      animations: 'disabled'
+    })
     fox.screenshot = `data:image/jpeg;base64,${buffer.toString('base64')}`
     fox.lastShotAt = Date.now()
   } catch {
@@ -1191,6 +1213,7 @@ function listClickTargets() {
 
 async function dumpPage(fox, page, step) {
   if (!debugDumps || !dumpDir || !page) return
+  if (SKIP_DUMP_STEPS.test(String(step))) return
   dumpSeq += 1
   const safe = String(step).replace(/[^\w.-]+/g, '_')
   const base = `${String(dumpSeq).padStart(3, '0')}-scout${fox.id}-${safe}`
@@ -1206,15 +1229,6 @@ async function dumpPage(fox, page, step) {
       targets: await page.evaluate(listClickTargets).catch(() => [])
     }
     await writeFile(join(dumpDir, `${base}.json`), `${JSON.stringify(meta, null, 2)}\n`, 'utf8')
-    const frames = page.frames()
-    for (let i = 0; i < frames.length; i++) {
-      const frame = frames[i]
-      if (frame === page.mainFrame()) continue
-      const fhtml = await frame.content().catch(() => '')
-      if (fhtml && fhtml.length > 80) {
-        await writeFile(join(dumpDir, `${base}-frame${i}.html`), fhtml, 'utf8')
-      }
-    }
   } catch (error) {
     process.stderr.write(`[dump ${step}] ${error instanceof Error ? error.message : error}\n`)
   }
@@ -1847,11 +1861,6 @@ function scriptHasPlaceOrder() {
   })
 }
 
-async function completeCheckoutFox(fox) {
-  await fillCheckoutFox(fox)
-  await placeOrderFox(fox)
-}
-
 async function fillCheckoutFox(fox) {
   throwIfAborted()
   const page = pageOf(fox)
@@ -1987,12 +1996,12 @@ async function handle(msg) {
     } else if (cmd === 'goto') {
       const fox = instances.get(msg.foxId)
       const target = normalizeUrl(msg.url)
-      if (fox && target) await navigate(fox, target)
+      if (!target) throw new Error('Only http(s) URLs are allowed')
+      if (fox) await navigate(fox, target)
     } else if (cmd === 'gotoAll') {
       const target = normalizeUrl(msg.url)
-      if (target) {
-        await Promise.allSettled([...instances.values()].map((fox) => navigate(fox, target)))
-      }
+      if (!target) throw new Error('Only http(s) URLs are allowed')
+      await Promise.allSettled([...instances.values()].map((fox) => navigate(fox, target)))
     } else if (cmd === 'rushCheckout') {
       autoAborted = false
       await Promise.allSettled([...instances.values()].map((fox) => rushCheckoutFox(fox)))
@@ -2033,22 +2042,6 @@ async function handle(msg) {
       if (!fox) throw new Error(`Scout ${msg.foxId} has no page`)
       trace(fox, 'rush', `qty ${msg.qtyPerOrder || autoQty}`)
       await autoRushFox(fox, msg.qtyPerOrder)
-    } else if (cmd === 'completeCheckout') {
-      const fox = instances.get(msg.foxId)
-      if (!fox) throw new Error(`Scout ${msg.foxId} has no page`)
-      try {
-        await completeCheckoutFox(fox)
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        trace(fox, 'error', message)
-        if (fox.status !== 'purchased' && fox.status !== 'aborted') {
-          fox.status = 'error'
-          fox.error = message
-          fox.statusLabel = 'Error'
-          emitUpdate()
-        }
-        throw error
-      }
     } else if (cmd === 'fillCheckout') {
       const fox = instances.get(msg.foxId)
       if (!fox) throw new Error(`Scout ${msg.foxId} has no page`)
@@ -2083,12 +2076,17 @@ async function handle(msg) {
       }
     } else if (cmd === 'abortAuto') {
       autoAborted = true
+      clearPaymentSecrets()
+      debugDumps = false
+      dumpDir = ''
       const reason = String(msg.reason || 'stopped')
       for (const fox of instances.values()) {
         abortFox(fox, reason)
         trace(fox, 'abort', reason)
       }
       emitUpdate()
+    } else if (cmd === 'clearPayment') {
+      clearPaymentSecrets()
     } else if (cmd === 'reload') {
       const fox = instances.get(msg.foxId)
       if (fox) {

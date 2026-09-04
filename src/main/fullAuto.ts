@@ -9,6 +9,7 @@ import { needsAiPick, pickLocalMatch, pickWithLlm, productIdFromUrl, scoreHits, 
 export const HOME_URL = 'https://secretlair.wizards.com/us'
 const HUNT_MS = 1800
 const MAX_TIMEOUT = 2_147_000_000
+const MAX_CHECKOUT_ATTEMPTS = 4
 
 export function emptyFullAuto(): FullAutoStatus {
   return {
@@ -48,6 +49,7 @@ type Run = {
   claimed: Set<string>
   confirmed: Set<string>
   completing: Set<string>
+  checkoutAttempts: Map<string, number>
   huntBusy: boolean
 }
 
@@ -109,6 +111,7 @@ export class FullAutoRunner {
       claimed: new Set(),
       confirmed: new Set(),
       completing: new Set(),
+      checkoutAttempts: new Map(),
       huntBusy: false
     }
     this.host.setDumpDir(dumpDir)
@@ -150,6 +153,7 @@ export class FullAutoRunner {
     if (wasActive) {
       this.host.log('disarm', 'user stopped Full Auto')
       await this.abortWorkers('disarmed')
+      await this.clearWorkerPayment()
       this.set({ ...emptyFullAuto(), phase: 'aborted', hasCvv: false })
     } else {
       this.set(emptyFullAuto())
@@ -159,7 +163,10 @@ export class FullAutoRunner {
 
   async shutdown(): Promise<void> {
     this.clearTimers()
+    const wasActive = this.run != null
     this.run = null
+    if (wasActive) await this.abortWorkers('shutdown')
+    await this.clearWorkerPayment()
   }
 
   private clearTimers(): void {
@@ -394,14 +401,22 @@ export class FullAutoRunner {
     } catch (error) {
       this.release(id)
       const message = error instanceof Error ? error.message : String(error)
-      this.host.log('retry', message, id)
+      if (!this.run) return
+      const attempts = (this.run.checkoutAttempts.get(id) || 0) + 1
+      this.run.checkoutAttempts.set(id, attempts)
+      if (attempts >= MAX_CHECKOUT_ATTEMPTS) {
+        this.host.log('give-up', `${message} · ${attempts} attempts`, id)
+        this.set({ error: `Scout ${id} checkout failed after ${attempts} attempts: ${message}` })
+        return
+      }
+      this.host.log('retry', `${message} · attempt ${attempts}/${MAX_CHECKOUT_ATTEMPTS}`, id)
       this.set({ error: message })
       holdCompleting = true
-        setTimeout(() => {
-          if (!this.run || this.status.phase === 'done' || this.status.phase === 'aborted') return
-          this.run.completing.delete(id)
-          void this.tryComplete(id)
-        }, 2000)
+      setTimeout(() => {
+        if (!this.run || this.status.phase === 'done' || this.status.phase === 'aborted') return
+        this.run.completing.delete(id)
+        void this.tryComplete(id)
+      }, 2000)
     } finally {
       if (!holdCompleting) this.run?.completing.delete(id)
     }
@@ -418,6 +433,7 @@ export class FullAutoRunner {
       }
     }
     this.run = null
+    await this.clearWorkerPayment()
     this.set({ phase: 'done', hasCvv: false })
   }
 
@@ -425,6 +441,14 @@ export class FullAutoRunner {
     await Promise.all(
       this.host.workerIds().map((id) =>
         this.host.callOn(id, 'abortAuto', { foxId: id, reason }).catch(() => undefined)
+      )
+    )
+  }
+
+  private async clearWorkerPayment(): Promise<void> {
+    await Promise.all(
+      this.host.workerIds().map((id) =>
+        this.host.callOn(id, 'clearPayment', { foxId: id }).catch(() => undefined)
       )
     )
   }

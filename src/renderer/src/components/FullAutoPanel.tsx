@@ -40,6 +40,11 @@ function defaultGoLive(): string {
   return toLocalInput(Date.now() + 10 * 60 * 1000)
 }
 
+function confirmReplaceSavedCard(hasCard: boolean, last4: string): boolean {
+  if (!hasCard || last4 === '4242') return true
+  return window.confirm('This replaces the card saved in Settings with the Stripe test card 4242. Continue?')
+}
+
 export default function FullAutoPanel({ fleetSize, status }: Props) {
   const [productQuery, setProductQuery] = useState('')
   const [foilHint, setFoilHint] = useState<FoilHint>('any')
@@ -127,10 +132,11 @@ export default function FullAutoPanel({ fleetSize, status }: Props) {
   }
 
   const onTestCard = async (): Promise<void> => {
-    setBusy(true)
     setError('')
     try {
       const settings = await window.lairscout.getSettings()
+      if (!confirmReplaceSavedCard(settings.hasCard, settings.cardLast4)) return
+      setBusy(true)
       const ship = normalizeShipping(settings)
       await window.lairscout.saveSettings({
         ...ship,
@@ -260,7 +266,7 @@ export default function FullAutoPanel({ fleetSize, status }: Props) {
           onChange={(event) => setDebugDumps(event.target.checked)}
           disabled={armed}
         />
-        Save page HTML at each click (testing)
+        Save page HTML at each click (skips payment pages)
       </label>
       <div className="auto-status">
         <span className={`chip ${status.phase === 'done' ? 'purchased' : status.phase}`}>
